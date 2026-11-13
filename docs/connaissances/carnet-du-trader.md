@@ -36,7 +36,7 @@ Pour tout trader qui veut garder une trace fiable de ses séances. Le carnet gra
 ## Questions fréquentes
 
 ### Je suis membre du Live Club, je dois payer le Premium ?
-Non. Le Premium est inclus. Connecte-toi dans l'extension avec le même email que ton compte AOKnowledge : l'écran « Mon forfait » doit afficher que tout est déjà ouvert. Si ce n'est pas le cas, l'équipe regarde.
+Non. Le Premium est inclus tant que ton abonnement au Live Club est actif. Connecte-toi dans l'extension avec le même email que ton compte AOKnowledge : l'écran « Mon forfait » doit afficher que tout est déjà ouvert. Si ce n'est pas le cas, l'équipe regarde.
 
 ### La dictée vocale ne marche pas.
 Au premier usage, le navigateur demande l'autorisation du micro, puis le modèle de dictée, environ 170 Mo, se télécharge une fois. Le choix du micro se fait dans les Paramètres de l'extension, section Dictée vocale.

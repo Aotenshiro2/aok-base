@@ -1,7 +1,7 @@
 ---
 sujet: live-club
 titre: Le Live Club
-resume: L'abonnement de lives éducatifs animés par Mélanie et Brice, avec le groupe Telegram, les replays, les modules de formation et le Carnet Premium. 139 € par mois, sans engagement. Pas encore membre : le même accès peut être offert pour une durée par un dépôt chez notre broker partenaire.
+resume: L'abonnement de lives éducatifs animés par Mélanie et Brice, avec le groupe Telegram, les replays, les modules de formation et le Carnet Premium tant que l'abonnement est actif. 139 € par mois, sans engagement. Pas encore membre : le même accès peut être offert pour une durée par un dépôt chez notre broker partenaire.
 mots: live club, lives, abonnement, telegram, groupe, replays, académie, pause, arrêt, bot, prix, meltrade, melaniechart, horaires, heures, annonce, broker, dépôt, raisefx, lots, accès offert
 verifie: 2026-11-10
 sources: sites/Aoknowledgecom/v3/src/pages/LiveClubPage.tsx ; sites/Aoknowledgecom/v3/src/pages/LiveClubCGVPage.tsx ; apps/journal-d-etude/src/lib/liveclub/config.ts (URLS_ABONNEMENT, URL_PORTAIL_CARTE, URL_FORMATION_LIVECLUB) ; src/lib/politique-information.ts (LIENS_UTILES, RaiseFx) ; src/lib/liveclub/accueil-groupe.ts ; src/lib/liveclub/emails.ts (modeleAccesBroker, modeleRappelFinBroker, modeleFinBroker, modeleRelanceLots, modeleSuspensionLots) ; src/lib/liveclub/lots-pur.ts (DELAI_LOTS_JOURS, EXEMPLE_LOTS, TENUE_LOTS, departLots) ; src/lib/liveclub/prompt-membre.ts (consigneLots, outil pause_par_depot) ; src/lib/liveclub/pause-depot-pur.ts (texteOffrePauseDepot : la pause par dépôt des abonnés, une autre offre) ; réponse de l'équipe au fil support bdb0cde7 du 10/11/2026 (accès par dépôt RaiseFx)
