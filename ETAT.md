@@ -369,6 +369,21 @@
   ~/Projects/_worktrees/journal-passation (branche passation-integration, 18828c5, ancetre de master) : elle ne prend
   les nouveaux modeles qu'apres un merge --ff-only de origin/master dans ce worktree, a faire avant le passage du 16/11.
 
+## DUREE DU « PREMIUM INCLUS » DANS LES MAILS ET LA FICHE DU BOT (13/11/2026, textes seuls, commite NON pousse, branche textes-premium-inclus depuis origin/master 4fda59b ; aucune migration)
+
+- Brief : D:\7_Agents\briefs\2026-11-13-textes-premium-inclus.md (reponses A de Brice le 12/11). Rapport :
+  D:\6_Societe\Pilotage\Data-Performance\prix\2026-11-textes-premium-inclus-rapport.md. Le site suit (branche du meme nom).
+- Mail d'acces du 10% Club (modeleEmailClub, club-paypal-pur.ts) et modeleFormation (mails-achat-pur.ts), meme phrase :
+  « Le Carnet du Trader et Pilotage sont aussi ouverts en Premium pendant 1 an, avec la meme adresse. Un mail vous
+  previent avant la fin de cette annee. » Le fichier des textes (D:\2_Creation\Productions\Ecriture\
+  2026-10-30-mails-confirmation-achat.md, section 5) a la meme phrase : verifier-mails-achat.mjs compare mot pour mot.
+- Fiche du bot : carnet-du-trader.md, dix-pour-cent-club.md, pilotage.md, live-club.md (Live Club : tant que l'abonnement
+  est actif ; 10% Club : pendant 1 an ; « a vie » = les videos). Rebase du 20/11 sur origin/master : le generateur
+  tourne de nouveau depuis connaissances-regen (16/11) ; les deux connaissances.generated.ts (journal et site) sont
+  regeneres par generer-connaissances.mjs --site et restent identiques.
+- Pas fait (lot du Max) : la fin reelle du Premium apres 1 an, le mail qui previent avant la fin, l'essai d'un mois
+  apres l'achat d'un module.
+
 ## SALON DE L'ACADEMIE : LES NOMS ET LA SIGNATURE DE L'EQUIPE (13/11/2026, correctif, commite NON pousse, branche chat-noms depuis origin/master 4491b52 ; migration 20261113120000 ECRITE NON appliquee)
 
 - Brief : D:\7_Agents\briefs\2026-11-13-chat-noms-signature.md (cartes chat-academie-noms et chat-academie-signature : A, A).

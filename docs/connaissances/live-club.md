@@ -14,7 +14,7 @@ Le Live Club, c'est l'entraînement sur le marché réel, animé par Mélanie et
 - Les replays : chaque live est rangé dans le Telegram du Live Club, dans le sujet Replay, à revoir quand tu veux.
 - Les modules de l'Académie inclus : https://aoknowledge.com/academie (connecte-toi avec l'email de ton abonnement).
 - Le groupe Telegram du Live Club : l'entraide entre membres, les explications de charts, les projections hebdomadaires Nasdaq et S&P 500. Les messages épinglés du groupe expliquent comment il marche.
-- Le Carnet du Trader Premium inclus, et le Journal d'Études et Pilotage gratuits.
+- Le Carnet du Trader et Pilotage en Premium, tant que l'abonnement est actif, et le Journal d'Études.
 
 ## Pour qui
 

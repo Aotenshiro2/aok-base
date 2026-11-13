@@ -508,7 +508,7 @@ export function modeleEmailClub(p: { email: string; essai: boolean; montant?: st
     paragraphes: [
       p.prenom ? `Bonjour ${p.prenom},` : 'Bonjour,',
       `Bienvenue dans le 10% Club. Merci, ${paiement}, et la formation complète est ouverte, à vie. Si vous payez en 4 fois, les échéances sont gérées par PayPal, pas par nous.`,
-      "Tout est dans l'académie : le parcours de 0 à 5, Psychologie et émotions, les Chroniques de l'Accélérateur, Journaling, nos articles privés, les archives et les replays du Live Club. Le Carnet du Trader Premium et Pilotage Premium sont inclus aussi, avec la même adresse.",
+      "Tout est dans l'académie : le parcours de 0 à 5, Psychologie et émotions, les Chroniques de l'Accélérateur, Journaling, nos articles privés, les archives et les replays du Live Club. Le Carnet du Trader et Pilotage sont aussi ouverts en Premium pendant 1 an, avec la même adresse. Un mail vous prévient avant la fin de cette année.",
       `Pour entrer : {lien:${URL_CONNEXION}|aoknowledge.com/connexion}, avec ${p.email}, l'adresse de votre achat. C'est elle qui ouvre l'accès. Pas encore de compte ? Il se crée à votre première connexion. Une autre adresse vous convient mieux ? Une fois connecté, ajoutez-la dans Mon espace, Comptes liés : {lien:${URL_COMPTES_LIES}|aoknowledge.com/mon-espace/parametres/comptes}`,
       'Vous pouvez reprendre le parcours depuis le début ou au niveau qui est le vôtre : votre progression se garde toute seule.',
       `Vous avez demandé l'accès immédiat en payant, ce qui vaut renonciation à votre droit de rétractation (nos conditions : {lien:${URL_CONDITIONS}|aoknowledge.com/conditions-generales}). Votre reçu, lui, vient de PayPal.`,

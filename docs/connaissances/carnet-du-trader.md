@@ -1,7 +1,7 @@
 ---
 sujet: carnet-du-trader
 titre: Le Carnet du Trader
-resume: L'extension de navigateur pour noter ses trades pendant la séance, gratuite, avec un Premium à 5,99 € par mois inclus pour les membres.
+resume: L'extension de navigateur pour noter ses trades pendant la séance, gratuite, avec un Premium à 5,99 € par mois, inclus pour les membres du Live Club (tant que l'abonnement est actif) et du 10% Club (pendant 1 an).
 mots: extension, carnet, chrome, navigateur, premium, capture, dictée, notes, panneau, forfait
 verifie: 2026-10-18
 sources: apps/carnet-du-trader-extension (public/manifest.json v1.8.10, src/lib/offres.ts, src/lib/i18n.ts « forfait », src/components/PlansView.tsx) ; sites/Aoknowledgecom/v3/src/pages/ExtensionPage.tsx ; apps/journal-d-etude/src/lib/entitlements.ts ; apps/journal-d-etude/src/lib/support-prompt.ts (problèmes fréquents)
@@ -24,7 +24,7 @@ Pour tout trader qui veut garder une trace fiable de ses séances. Le carnet gra
 
 - Le Carnet gratuit : sans moyen de paiement, sans limite de durée. Un bouton « Analyser avec une IA » envoie ta note dans ton propre assistant IA, celui où tu as déjà un compte, avec la consigne déjà écrite.
 - Le Carnet Premium : 5,99 € par mois, ou 57,50 € par an (4,79 € par mois), sans engagement. Il ajoute la capture lue par l'IA, tes graphiques lus à l'image, tes notes approfondies et le mentorat qui te répond, selon la méthode de l'académie.
-- Le Premium est inclus, sans rien payer en plus, pour les membres du Live Club et du 10% Club : il suffit de se connecter dans l'extension avec son compte AOKnowledge.
+- Le Premium est inclus, sans rien payer en plus, pour les membres du Live Club (tant que l'abonnement est actif) et du 10% Club (pendant 1 an) : il suffit de se connecter dans l'extension avec son compte AOKnowledge.
 - L'abonnement Premium se prend depuis l'extension, onglet « Mon forfait », pour qu'il soit rattaché à la bonne adresse.
 
 ## Comment y aller
