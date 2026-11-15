@@ -53,6 +53,7 @@ export async function POST(req: NextRequest) {
       const a = r.achat
       const mail = await mailAchatModule({
         session, sessionId: a.sessionId, moduleSlug: a.moduleSlug, email: a.email, montantEur: a.montantEur, essai: a.essai,
+        offreSlug: a.offreSlug,
       })
       return NextResponse.json({ ok: true, etat: 'ouvert', mail })
     }

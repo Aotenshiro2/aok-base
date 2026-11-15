@@ -44,6 +44,9 @@ import { formaterEuros, prenomDe } from '@/lib/mails-achat-pur'
  * module-smt) : l'acces est pose sur son offre (module-la-formation-complete,
  * qui ouvre le module), renonciation = create_time de la commande (la case est
  * exigee avant), puis l'email d'un achat de module (modeleEmailModule).
+ * 15/11/2026, une partie vendue seule (reference_id module-smt-partie-1 ou
+ * module-smt-partie-2) : meme chemin, l'acces pose sur l'offre de la partie
+ * (elle n'ouvre que sa section), l'email au nom de la partie.
  *
  * Corps : { order_id }, Bearer facultatif (seulement pour compte_lie).
  * 200 { ok, etat: 'ouvert', email, compte_lie, offre } | { ok, etat: 'en_attente', offre }

@@ -18,6 +18,9 @@
 //                          vendu seul (14/11/2026, a cote du bouton carte de sa
 //                          page). Sans elle, le site ne montre pas les boutons
 //                          PayPal et seul l'essai admin a 1 EUR passe.
+//   SMT_PARTIE_1_PAYPAL_PUBLIC=1, SMT_PARTIE_2_PAYPAL_PUBLIC=1  la meme chose
+//                          pour chaque partie de Smart Money Technique vendue
+//                          seule (15/11/2026), une variable par partie.
 //   COACHING_RESERVATION_URL  lien https de reservation des seances, mis dans
 //                          l'email du coaching. Absente : « Brice vous contacte
 //                          sous 48 h » (aucun lien propre au coaching le 08/11).
@@ -56,11 +59,14 @@ export const ventePubliqueClub = () => process.env.CLUB_PAYPAL_PUBLIC?.trim() ==
 /**
  * La vente publique de l'offre : CLUB_PAYPAL_PUBLIC pour le Club,
  * COACHING_PAYPAL_PUBLIC pour le coaching, SMT_PAYPAL_PUBLIC pour Smart Money
- * Technique. Une variable par offre, fermee par defaut.
+ * Technique, SMT_PARTIE_1_PAYPAL_PUBLIC et SMT_PARTIE_2_PAYPAL_PUBLIC pour
+ * chacune de ses parties. Une variable par offre, fermee par defaut.
  */
 export function ventePublique(offre: CleOffre): boolean {
   if (offre === 'coaching') return process.env.COACHING_PAYPAL_PUBLIC?.trim() === '1'
   if (offre === 'smt') return process.env.SMT_PAYPAL_PUBLIC?.trim() === '1'
+  if (offre === 'smt-partie-1') return process.env.SMT_PARTIE_1_PAYPAL_PUBLIC?.trim() === '1'
+  if (offre === 'smt-partie-2') return process.env.SMT_PARTIE_2_PAYPAL_PUBLIC?.trim() === '1'
   return ventePubliqueClub()
 }
 

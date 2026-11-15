@@ -21,6 +21,11 @@ import { messageErreur } from '@/lib/liveclub/pur'
  * ouvert tout de suite), prix lu en base seulement (aucun defaut), vente
  * publique par SMT_PAYPAL_PUBLIC=1, fermee par defaut.
  *
+ * 15/11/2026 : une partie de ce module vendue seule, { offre: 'smt-partie-1' }
+ * ou 'smt-partie-2' (offres module-la-formation-complete-partie-1 et -2). Memes
+ * regles que le module : case exigee, prix de l'offre en base seulement,
+ * SMT_PARTIE_1_PAYPAL_PUBLIC et SMT_PARTIE_2_PAYPAL_PUBLIC, fermees par defaut.
+ *
  * Corps : { offre?, email?, renonciation: true (Club et module), essai?: true }.
  * Bearer facultatif : connecte, le compte part en custom_id (u:<uuid>, lu dans
  * le jeton, jamais dans le corps) et l'email du corps est ignore ; sinon

@@ -34,6 +34,15 @@
 // `module` (le module ouvert, son nom public) : la capture pose l'acces sur
 // l'offre, puis l'email d'un achat de module (modeleEmailModule). Les parties
 // 1 et 2 s'ajouteront de la meme facon, une ligne dans OFFRES_PAYPAL chacune.
+//
+// 15/11/2026 (go de Brice, « 850 en separe ») : les deux parties de Smart
+// Money Technique se vendent aussi seules, chacune par son offre
+// (module-la-formation-complete-partie-1 et -partie-2, convention
+// module-<module>-partie-<n>, une section du module chacune). Meme mecanique
+// que le module : prix lu en base SEULEMENT (aucun defaut), case de
+// renonciation, une variable de vente publique par partie, fermee par defaut.
+// L'acces est pose sur l'offre de la partie : c'est elle qui n'ouvre que sa
+// section (academie_offre_contenus.section_id).
 
 /** L'offre que vend /club : la formation complete (17 modules, Masterclass a part). */
 export const OFFRE_CLUB = 'formation-complete'
@@ -43,6 +52,10 @@ export const OFFRE_COACHING = 'coaching-8h'
 
 /** L'offre du module Smart Money Technique vendu seul (academie_offres.slug, deja en base le 14/11). */
 export const OFFRE_SMT = 'module-la-formation-complete'
+
+/** Les parties de Smart Money Technique vendues seules (15/11/2026) : une section du module chacune. */
+export const OFFRE_SMT_PARTIE_1 = 'module-la-formation-complete-partie-1'
+export const OFFRE_SMT_PARTIE_2 = 'module-la-formation-complete-partie-2'
 
 /** Le prix public si la base n'en donne pas (academie_offres.prix_eur). */
 export const PRIX_CLUB_DEFAUT_EUR = 1999
@@ -60,7 +73,7 @@ export const DESCRIPTION_COMMANDE = '10% Club - formation complète AO Knowledge
 // Les offres vendues par ce tunnel PayPal
 // ---------------------------------------------------------------------------
 
-export type CleOffre = 'club' | 'coaching' | 'smt'
+export type CleOffre = 'club' | 'coaching' | 'smt' | 'smt-partie-1' | 'smt-partie-2'
 
 /** Le module qu'ouvre une offre de module : son slug (l'adresse) et son nom public (l'email). */
 export type ModulePayPal = { slug: string; titre: string }
@@ -133,12 +146,38 @@ export const OFFRES_PAYPAL: Record<CleOffre, OffrePayPal> = {
     renonciation: true,
     module: { slug: 'la-formation-complete', titre: 'Smart Money Technique' },
   },
+  // Une partie de Smart Money Technique vendue seule (15/11/2026). Prix lu en
+  // base seulement ; l'acces s'ouvre sur l'offre de la partie (sa section).
+  'smt-partie-1': {
+    cle: 'smt-partie-1',
+    slug: OFFRE_SMT_PARTIE_1,
+    nom: 'Smart Money Technique, partie 1',
+    prixDefautEur: null,
+    reference: 'module-smt-partie-1',
+    referenceEssai: 'module-smt-partie-1-essai',
+    description: 'Smart Money Technique, partie 1 (épisodes 0 à 19) - AO Knowledge',
+    prefixeCapture: 'smt-p1-capture-',
+    renonciation: true,
+    module: { slug: 'la-formation-complete', titre: 'Smart Money Technique, partie 1' },
+  },
+  'smt-partie-2': {
+    cle: 'smt-partie-2',
+    slug: OFFRE_SMT_PARTIE_2,
+    nom: 'Smart Money Technique, partie 2',
+    prixDefautEur: null,
+    reference: 'module-smt-partie-2',
+    referenceEssai: 'module-smt-partie-2-essai',
+    description: 'Smart Money Technique, partie 2 (épisodes 20 à 39) - AO Knowledge',
+    prefixeCapture: 'smt-p2-capture-',
+    renonciation: true,
+    module: { slug: 'la-formation-complete', titre: 'Smart Money Technique, partie 2' },
+  },
 }
 
 /**
  * L'offre demandee par la page : absente = le 10% Club (les pages d'avant le
  * 08/11 n'envoient rien), sinon une cle de OFFRES_PAYPAL ('club', 'coaching',
- * 'smt'), sinon null (la route rend 400).
+ * 'smt', 'smt-partie-1', 'smt-partie-2'), sinon null (la route rend 400).
  */
 export function offrePayPal(v: unknown): OffrePayPal | null {
   if (v === undefined || v === null) return OFFRES_PAYPAL.club

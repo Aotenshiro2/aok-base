@@ -35,6 +35,23 @@ export type OffreEnVente = {
   moduleTitre: string
   offreSlug: string
   stripePriceId: string
+  /**
+   * (15/11/2026) Une partie du module vendue seule : le titre de son offre
+   * (« Smart Money Technique, partie 2 »), qui nomme le paiement a la place du
+   * titre du module. Absent : le module entier.
+   */
+  partie?: string | null
+}
+
+/**
+ * (15/11/2026) Le slug d'une offre de partie tel que la page peut l'envoyer :
+ * « module-<module>-partie-<n> » (n de 1 a 99). La base confirme ensuite que
+ * l'offre existe, se vend, et n'ouvre que des sections de ce module.
+ */
+export function offrePartie(v: unknown, moduleSlug: string): string | null {
+  if (typeof v !== 'string' || v.length > 80) return null
+  const m = /^module-([a-z0-9]+(?:-[a-z0-9]+)*)-partie-([1-9][0-9]?)$/.exec(v)
+  return m && m[1] === moduleSlug ? v : null
 }
 
 /** Les conditions generales du site, liees dans la case a cocher de Checkout. */
@@ -85,7 +102,7 @@ export function corpsSession(o: OffreEnVente, p: {
   c.set('metadata[essai]', p.essai ? '1' : '0')
   // Le libelle du paiement : c'est lui que le pipeline du cockpit lit pour
   // classer la vente (push_membres_supabase.py, MOTIFS_OFFRES « ^academie aok »).
-  c.set('payment_intent_data[description]', `Académie AOK : ${o.moduleTitre}`.slice(0, 900))
+  c.set('payment_intent_data[description]', `Académie AOK : ${o.partie?.trim() || o.moduleTitre}`.slice(0, 900))
   c.set('payment_intent_data[metadata][source]', 'academie')
   c.set('payment_intent_data[metadata][academie_module]', o.moduleSlug)
   c.set('payment_intent_data[metadata][academie_offre]', o.offreSlug)

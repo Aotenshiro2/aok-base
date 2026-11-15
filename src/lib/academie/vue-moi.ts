@@ -95,6 +95,8 @@ export function construire(catalogue: Catalogue, droits: Droits, progression: Ma
       lien_externe: null,
       offres: (catalogue.offresParModule.get(m.id) ?? []).map(o => ({
         slug: o.slug, titre: o.titre, type: o.type, prix_eur: o.prixEur, portee: o.portee,
+        // (15/11/2026) Les sections d'une offre de portee 'sections' : la page sait quelle partie elle vend.
+        sections: o.sections,
       })),
       acces: acces.acces,
       raisons: acces.raisons,

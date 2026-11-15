@@ -58,8 +58,10 @@ import { soutienDuCompte, type SoutienDuCompte } from '@/lib/soutien'
  *                 lien_externe,             https vers un autre site (Masterclass) ou null ; rempli =
  *                                           ni lecons ni offres, acces 'entier' sans raison (pas de cadenas),
  *                                           progression a zero : le site fait de la carte un lien
- *                 offres: [{ slug, titre, type, prix_eur, portee }],   ce qui l'ouvre (portee : module,
- *                                           sections = une partie, tout = l'offre ouvre tout, ETM)
+ *                 offres: [{ slug, titre, type, prix_eur, portee, sections }],   ce qui l'ouvre (portee : module,
+ *                                           sections = une partie, tout = l'offre ouvre tout, ETM) ;
+ *                                           sections (15/11/2026) : les ids des sections ouvertes par
+ *                                           une offre de portee 'sections', vide sinon
  *                 acces: entier | partiel | ferme | inconnu, raisons,
  *                 progression: { lecons, vues, en_cours, ouvertes, commencees, pourcentage },
  *                           pourcentage = part des lecons ACCESSIBLES a l'eleve a l'etat 'vu'

@@ -48,6 +48,8 @@ export type OffreDuModule = {
   prixEur: number | null
   /** module : le module entier ; sections : une partie ; tout : l'offre ouvre tout le catalogue (ETM). */
   portee: 'module' | 'sections' | 'tout'
+  /** (15/11/2026) Portee 'sections' : les sections ouvertes (ids). Vide sinon. */
+  sections: string[]
 }
 
 export type SectionCatalogue = { id: string; moduleId: string; ordre: number; titre: string }
@@ -109,6 +111,7 @@ type LigneModule = {
 type LigneOffre = {
   module_id: string | null; slug: string; titre: string; type: string; prix_eur: number | null
   portee: 'module' | 'sections' | 'tout'
+  sections: string[] | null
 }
 type LigneSection = { id: string; module_id: string; ordre: number; titre: string }
 type LigneLecon = {
@@ -172,7 +175,7 @@ async function lireCatalogueEnBase(): Promise<Catalogue> {
   const offres = await prisma.$queryRawUnsafe<LigneOffre[]>(SQL_OFFRES_DES_MODULES)
 
   const offreDeLigne = (o: LigneOffre): OffreDuModule =>
-    ({ slug: o.slug, titre: o.titre, type: o.type, prixEur: o.prix_eur, portee: o.portee })
+    ({ slug: o.slug, titre: o.titre, type: o.type, prixEur: o.prix_eur, portee: o.portee, sections: Array.isArray(o.sections) ? o.sections : [] })
   const offresTout = offres.filter(o => o.module_id === null).map(offreDeLigne)
   const offresParModule = new Map<string, OffreDuModule[]>()
   for (const m of modules) {

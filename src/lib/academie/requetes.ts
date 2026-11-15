@@ -189,16 +189,20 @@ select m.id::text as id, m.slug, m.titre, m.resume, m.ordre, m.parcours, m.statu
  * Les offres qui ouvrent quelque chose de chaque module (pour le cadenas des
  * ecrans : « ce module s'obtient avec... ») : portee 'module' (le module
  * entier), 'sections' (une partie seulement) ; et, module_id vide, les offres
- * qui ouvrent tout (portee 'tout', ETM).
+ * qui ouvrent tout (portee 'tout', ETM). sections (15/11/2026) : les sections
+ * qu'ouvre une offre de portee 'sections' (vide sinon), pour qu'une page sache
+ * QUELLE partie une offre de partie vend.
  */
 export const SQL_OFFRES_DES_MODULES = `
 select c.module_id::text as module_id, o.slug, o.titre, o.type, o.prix_eur::float8 as prix_eur,
-       case when bool_or(c.section_id is null) then 'module' else 'sections' end as portee
+       case when bool_or(c.section_id is null) then 'module' else 'sections' end as portee,
+       case when bool_or(c.section_id is null) then '{}'::text[]
+            else array_agg(c.section_id::text order by c.section_id::text) end as sections
   from public.academie_offre_contenus c
   join public.academie_offres o on o.id = c.offre_id
  group by c.module_id, o.id
 union all
-select null::text, o.slug, o.titre, o.type, o.prix_eur::float8, 'tout'
+select null::text, o.slug, o.titre, o.type, o.prix_eur::float8, 'tout', '{}'::text[]
   from public.academie_offres o
  where o.ouvre_tout
  order by 1, 2
@@ -494,6 +498,30 @@ select m.slug as module_slug, m.titre as module_titre, o.slug as offre_slug, o.s
  where m.slug = $1::text and m.statut = 'publie'
    and o.type = 'module' and o.canal = 'stripe_aok'
    and o.prix_eur is not null and o.prix_eur > 0 and o.stripe_price_id is not null
+ limit 1
+`
+
+/**
+ * (15/11/2026) $1 = slug du module, $2 = slug de l'offre d'une PARTIE du
+ * module. L'offre si elle se vend seule chez Stripe Ao Knowledge : son slug
+ * est exactement « module-<module>-partie-<n> », module publie, offre de type
+ * module, canal stripe_aok, prix et stripe_price_id poses, et ses contenus
+ * sont des sections de CE module seulement (au moins une, jamais le module
+ * entier ni un autre module). Aucune ligne = pas en vente. Le prix facture est
+ * celui de stripe_price_id, jamais une valeur venue de la page.
+ */
+export const SQL_OFFRE_PARTIE_EN_VENTE = `
+select m.slug as module_slug, m.titre as module_titre, o.slug as offre_slug, o.stripe_price_id, o.titre as offre_titre
+  from public.academie_modules m
+  join public.academie_offres o
+    on o.slug = 'module-' || m.slug || '-partie-' || substring($2::text from '-partie-([0-9]{1,2})$')
+ where m.slug = $1::text and m.statut = 'publie' and o.slug = $2::text
+   and o.type = 'module' and o.canal = 'stripe_aok'
+   and o.prix_eur is not null and o.prix_eur > 0 and o.stripe_price_id is not null
+   and exists (select 1 from public.academie_offre_contenus c where c.offre_id = o.id)
+   and not exists (
+     select 1 from public.academie_offre_contenus c
+      where c.offre_id = o.id and (c.module_id <> m.id or c.section_id is null))
  limit 1
 `
 

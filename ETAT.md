@@ -1,5 +1,30 @@
 # ETAT du journal d etudes
 
+## SMART MONEY TECHNIQUE PAR PARTIE : LA PARTIE 1 OU LA PARTIE 2 SEULE, CARTE ET 4x PAYPAL (15/11/2026, go de Brice « 1500 si les deux parties sont prises d'un coup, 850 en separe », commite NON pousse, branche parties-smt rebasee sur origin/master e0cd85f ; aucune migration ; RIEN cree en base ni chez Stripe ou PayPal)
+
+- Convention des offres de partie : slug « module-<module>-partie-<n> » (module-la-formation-complete-partie-1 et -2),
+  type module, canal stripe_aok, cockpit_offre_id academie-module, UNE ligne academie_offre_contenus par offre (module +
+  section_id). Prix = prix_eur de l'offre en base, lu cote serveur (aucun prix dans le code, aucun venu de la page).
+  SQL, objets Stripe et variables a poser : rapport de l'agent a l'Orchestre Prix (c'est lui qui les cree au go).
+- Carte : POST /api/academie/achat accepte { offre } (offrePartie, achat-pur.ts : le slug doit nommer une partie de CE
+  module, sinon 400). SQL_OFFRE_PARTIE_EN_VENTE verifie en base : slug exact, stripe_aok, prix et stripe_price_id, contenus
+  = des sections de ce module seulement (jamais le module entier). Absente : 404 'module'. Session : metadata
+  academie_offre = l'offre de la partie (le webhook pose l'acces dessus, inchange), libelle « Académie AOK : <titre de
+  l'offre> ». Mail de carte (mailAchatModule) : une partie prend le titre de SON offre.
+- PayPal : OFFRES_PAYPAL['smt-partie-1'] et ['smt-partie-2'] (reference_id module-smt-partie-<n>[-essai], capture
+  smt-p<n>-capture-), prix en base seulement, case de renonciation, mail modeleEmailModule au nom de la partie. Vente
+  fermee tant que SMT_PARTIE_1_PAYPAL_PUBLIC / SMT_PARTIE_2_PAYPAL_PUBLIC != 1 (essai admin a 1 EUR seul).
+- /moi et /catalogue : chaque offre porte `sections` (ids, portee 'sections'), pour que le site sache quelle partie une
+  offre vend. Le site (branche parties-smt du workspace) propose ce que la personne n'a pas : rien = le module a 1 500 et
+  les parties au clic ; une partie (Live Club) = l'autre seule, jamais le module entier.
+- Bot : docs/connaissances/academie.md dit qu'on peut prendre une partie seule (sans prix) ; les deux fichiers generes
+  patches a l'identique (le generateur s'arrete toujours sur masterclass.md, sans lien).
+- Verifs : node scripts/verifier-parties-smt.mjs (9 blocs), module-paypal (12), club-paypal (15, avec MIGRATIONS_DIR),
+  coaching-paypal (12), achat-academie (5), academie, tsc, eslint, next build. Requetes essayees en lecture sur la base
+  (CTE avec de fausses offres, aucune ecriture).
+- MISE EN LIGNE : offres en base + produits et prix Stripe, puis ce journal, puis le site, puis les deux variables
+  PayPal et redeploiement du journal.
+
 ## L'AVANCEE DE SKOOL PRE-REMPLIE TOUTE SEULE : RATTACHEMENT AUTOMATIQUE (EMAIL PUIS NOM, EN RECOUPANT LE COCKPIT) ET PRE-REMPLISSAGE A LA CONNEXION (15/11/2026 soir, go de Brice, commite NON pousse, branche academie-reprise-auto depuis origin/master e041f62 ; migration 20261115200000 du workspace ECRITE NON appliquee)
 
 - Brief : D:\7_Agents\briefs\2026-11-15-academie-reprise-auto.md (section 1 bis : « recouper avec tout ce que le Cockpit
@@ -140,6 +165,7 @@
   cockpit 'replay' (SQL_REPLAY_SERIE / SQL_REPLAY_PONCTUEL) ; ChampsLive porte type_live et les deux mentions ;
   COCKPIT_ARRIERE_JOURS = 28 ; migrationAbsente reconnait 42703 (colonne). A POUSSER APRES la migration 20261115120000.
 - scripts/verifier-lives.mjs : 25 blocs (dont rapprochements, refus non-admin et hors liste, non-ecrasement, doublons).
+
 
 ## SMART MONEY TECHNIQUE PAYABLE PAR PAYPAL (4x) SUR SA PAGE, A COTE DE LA CARTE (14/11/2026, go de Brice, commite NON pousse, branche paypal-smt depuis origin/master 1767fae ; aucune migration)
 

@@ -147,20 +147,31 @@ export async function mailAchatCarnet(cle: string, session: Record<string, unkno
   return envoyerMailAchat(plan.produit, plan.reference, plan.variables)
 }
 
-/** Un module a l'unite : apres l'acces pose par le webhook de l'academie. */
+/**
+ * Un module a l'unite : apres l'acces pose par le webhook de l'academie.
+ * offreSlug (15/11/2026) : l'offre payee. Une partie du module
+ * (« module-<slug>-partie-<n> ») donne au mail le titre de SON offre (« Smart
+ * Money Technique, partie 2 ») : le titre du module ferait croire qu'il est
+ * ouvert en entier.
+ */
 export async function mailAchatModule(p: {
   session: Record<string, unknown>; sessionId: string; moduleSlug: string; email: string | null; montantEur: number | null; essai: boolean
+  offreSlug?: string | null
 }): Promise<IssueMail> {
   const s = lireSessionPayee(p.session)
   const email = s?.email ?? p.email
   if (!email) return 'sans_email'
   let titre: string | null = null
+  const partie = p.offreSlug && p.offreSlug !== `module-${p.moduleSlug}` ? p.offreSlug : null
   try {
-    const l = await prisma.$queryRawUnsafe<{ titre: string | null }[]>(
-      'select titre from public.academie_modules where slug = $1::text limit 1', p.moduleSlug)
+    const l = partie
+      ? await prisma.$queryRawUnsafe<{ titre: string | null }[]>(
+        'select titre from public.academie_offres where slug = $1::text limit 1', partie)
+      : await prisma.$queryRawUnsafe<{ titre: string | null }[]>(
+        'select titre from public.academie_modules where slug = $1::text limit 1', p.moduleSlug)
     titre = l[0]?.titre?.trim() || null
   } catch (err) {
-    console.warn(`[mails-achat] titre du module illisible : ${messageErreur(err)}`)
+    console.warn(`[mails-achat] titre du ${partie ? 'module (partie)' : 'module'} illisible : ${messageErreur(err)}`)
   }
   return envoyerMailAchat('module', p.sessionId, {
     prenom: s?.prenom ?? null,

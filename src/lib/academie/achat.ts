@@ -21,14 +21,17 @@
 //
 // Une session payee ouvre l'offre « module-<slug> » par academie_acces
 // (source stripe, reference = cs_..., paiement_id = stripe:ch_..., cote
-// brice). droitsAcademie la retrouve par user_id ou par l'email verifie du
+// brice). 15/11/2026 : ou l'offre d'une partie, « module-<slug>-partie-<n> »
+// (offrePartieEnVente), qui n'ouvre que sa section : le webhook la relit dans
+// metadata.academie_offre, rien d'autre ne change. droitsAcademie la retrouve par user_id ou par l'email verifie du
 // compte : rien d'autre a invalider (aucun cache sur les acces).
 
 import { prisma } from '@/lib/db'
 import { oublierDroitsDuCompte } from '@/lib/trouver-cours'
 import { corpsSession, lireAchat, type AchatLu, type LectureAchat, type OffreEnVente } from './achat-pur'
 import {
-  SQL_COMPLETER_PAIEMENT, SQL_COMPTES_DE_EMAIL, SQL_EMAIL_CONFIRME, SQL_OFFRE_EN_VENTE, SQL_POSER_ACHAT, SQL_RETIRER_REMBOURSE,
+  SQL_COMPLETER_PAIEMENT, SQL_COMPTES_DE_EMAIL, SQL_EMAIL_CONFIRME, SQL_OFFRE_EN_VENTE, SQL_OFFRE_PARTIE_EN_VENTE, SQL_POSER_ACHAT,
+  SQL_RETIRER_REMBOURSE,
 } from './requetes'
 
 const API = 'https://api.stripe.com'
@@ -95,6 +98,22 @@ export async function offreEnVente(slug: string): Promise<OffreEnVente | null> {
   }[]>(SQL_OFFRE_EN_VENTE, slug))[0]
   if (!l) return null
   return { moduleSlug: l.module_slug, moduleTitre: l.module_titre, offreSlug: l.offre_slug, stripePriceId: l.stripe_price_id }
+}
+
+/**
+ * (15/11/2026) L'offre d'une PARTIE du module (« module-<slug>-partie-<n> »),
+ * si elle se vend seule : sinon null (pas encore en base, pas de prix ou de
+ * stripe_price_id, ou elle ouvre autre chose que des sections de ce module).
+ */
+export async function offrePartieEnVente(slug: string, offre: string): Promise<OffreEnVente | null> {
+  const l = (await prisma.$queryRawUnsafe<{
+    module_slug: string; module_titre: string; offre_slug: string; stripe_price_id: string; offre_titre: string
+  }[]>(SQL_OFFRE_PARTIE_EN_VENTE, slug, offre))[0]
+  if (!l) return null
+  return {
+    moduleSlug: l.module_slug, moduleTitre: l.module_titre, offreSlug: l.offre_slug, stripePriceId: l.stripe_price_id,
+    partie: l.offre_titre,
+  }
 }
 
 export async function emailConfirme(userId: string): Promise<string | null> {
