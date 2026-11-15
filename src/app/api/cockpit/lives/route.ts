@@ -29,6 +29,10 @@ import {
  *   { action: 'annuler', cible }   { action: 'retablir', cible }
  *   { action: 'deplacer', cible, debut | null, duree_min? }   null : l'horaire de la serie
  *   { action: 'texte_date', cible, titre?, description? }   le titre ou la description de cette date
+ *   { action: 'replay', cible, replay | null }   (15/11/2026, carte 378) le replay de cette date : chemin d'une
+ *                                                lecon (/academie/module/lecon) ou lien YouTube ; null : retire
+ * Les lives poses par la tache du programme (cree_par = 'programme', scripts/lives-programme.mjs) se
+ * corrigent ici comme les autres : un geste les passe « a la main », la tache ne les remet plus a jour.
  * Les gestes rendent { ok: true } : l'ecran relit (« recharger a l'action »).
  * 400 { error } ; 401 ; 403 hors allowlist ; 404 introuvable (ou date qui n'est pas une date de la serie) ;
  * 503 { error, code: 'migration' } tables absentes, ou { error } base indisponible.
@@ -130,18 +134,22 @@ export async function POST(req: NextRequest) {
       case 'annuler':
       case 'retablir':
       case 'deplacer':
-      case 'texte_date': {
+      case 'texte_date':
+      case 'replay': {
         const { sql, valeurs } = requeteDate(d, par)
         const id = await un(sql, valeurs)
         if (!id) return introuvable('serie_id' in d.cible ? "Cette date n'est pas une date de la série." : 'Live introuvable.')
         const cible = 'serie_id' in d.cible ? `${court(d.cible.serie_id)}:${d.cible.date_serie}` : court(d.cible.id)
-        console.info(`[cockpit/lives] ${d.action} ${cible}${d.action === 'lien' ? (d.lien ? ' (pose)' : ' (retire)') : ''}`)
+        const quoi = d.action === 'lien' ? (d.lien ? ' (pose)' : ' (retire)') : d.action === 'replay' ? (d.replay ? ' (pose)' : ' (retire)') : ''
+        console.info(`[cockpit/lives] ${d.action} ${cible}${quoi}`)
         return fait()
       }
     }
   } catch (err) {
     if (migrationAbsente(err)) {
-      return NextResponse.json({ error: 'Migration 20261113200000_academie_lives pas appliquée.', code: 'migration' }, { status: 503, headers })
+      const m = err instanceof Error ? err.message : String(err)
+      const laquelle = /42703|column .* does not exist/i.test(m) ? '20261115120000_academie_lives_programme' : '20261113200000_academie_lives'
+      return NextResponse.json({ error: `Migration ${laquelle} pas appliquée.`, code: 'migration' }, { status: 503, headers })
     }
     const m = err instanceof Error ? err.message : String(err)
     // Une contrainte de la base (cas que la lecture du corps aurait du arreter) : 400, sans le detail.

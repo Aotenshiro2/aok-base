@@ -1,5 +1,36 @@
 # ETAT du journal d etudes
 
+## LIVES DU PROGRAMME DE LA SEMAINE, LIEN AVANT CHAQUE LIVE, REPLAY LE LENDEMAIN (15/11/2026, FEATURE, cartes 378 et 379 en A, commite NON pousse, branche academie-lives-programme depuis origin/master a2c18b6 ; migration du workspace 20261115120000 ECRITE NON appliquee)
+
+- Brief : D:\7_Agents\briefs\2026-11-15-academie-lives-programme-et-replays.md ; rapport academie-lives-programme-rapport.md
+  (notes de Yume Orchestre).
+- Logique PURE : src/lib/academie/lives-programme.ts (aucun import a l'execution). Tache : scripts/lives-programme.mjs
+  (role postgres via DATABASE_URL de .env.local, comme les routes), commandes tourner [--armer], programme, passage,
+  fenetres, rejouer ; --simulation : rien en base, aucune alerte, aucune tache armee.
+- Programme : la derniere photo SANS lien postee dans Annonce par un admin depuis le vendredi, lue par Claude (vision,
+  claude-opus-5-5, sortie structuree + relecture stricte lireReponseModele : hors schema = rejete en entier ; repli serveur
+  fallbacks « default »), reponse gardee en cache par image (meme image = aucun nouvel appel). Lives ponctuels cree_par =
+  'programme', acces live_club, genre aok, 90 min par defaut (ou la plage ecrite). Cle programme_cle = semaine|jour|heure|
+  intervenants, index unique + on conflict do nothing : aucun doublon. Une ligne modifiee a la main n'est jamais remise a
+  jour (estAMain, SQL_PROGRAMME_MAJ garde cree_par = modifie_par = 'programme'). Un live deja au calendrier (meme jour,
+  45 min, meme intervenant) n'est pas double. « A confirmer » et « horaire a definir » gardes tels quels.
+- Lien : passages de 30 min avant a 5 min apres le debut, toutes les 5 min. Seuls les admins par IDENTIFIANT Telegram
+  (ADMINS : Brice 255151279, Mel 1899133088, Adrien 1392343532) et les domaines zoom.us (+ sous-domaines),
+  meet.google.com ; poste de 60 min avant a 30 min apres le debut, par un intervenant du live. SQL_LIEN_TACHE ne remplit
+  qu'un lien VIDE, avec le motif des domaines en garde dans la requete.
+- Replay : le lendemain a 9 h et 15 h. Mel, Adrien : la lecon PUBLIEE de rediffusion-des-lives du meme jour, intervenant
+  commun, hors « biais » ; Brice : le lien YouTube poste par Brice apres le live (la date et l'heure citees dans le message
+  departagent). SQL_REPLAY_TACHE ne remplit qu'un replay VIDE.
+- Doute : rien d'ecrit, alerte texte a l'equipe (cockpit_telegram_comptes diffusion 'equipe', bot du cockpit, une fois
+  par point, etat dans D:\6_Societe\Pilotage\Academie\catalogue\lives-programme\etat.json).
+- Cle Claude : ANTHROPIC_API_KEY_ACADEMIE_LIVES ou credentials.local\anthropic-academie-lives.local.json, AUCUNE autre
+  essayee. ABSENTE le 15/11 (rapport).
+- lives.ts : fenetreMembre lit aussi les 4 dernieres semaines (lives passes, etat 'fini') ; LiveMembre porte type_live,
+  a_confirmer, horaire_a_definir, replay (replayPourMembre : lecon a tous, YouTube a qui a droit), replay_reserve ; action
+  cockpit 'replay' (SQL_REPLAY_SERIE / SQL_REPLAY_PONCTUEL) ; ChampsLive porte type_live et les deux mentions ;
+  COCKPIT_ARRIERE_JOURS = 28 ; migrationAbsente reconnait 42703 (colonne). A POUSSER APRES la migration 20261115120000.
+- scripts/verifier-lives.mjs : 25 blocs (dont rapprochements, refus non-admin et hors liste, non-ecrasement, doublons).
+
 ## SMART MONEY TECHNIQUE PAYABLE PAR PAYPAL (4x) SUR SA PAGE, A COTE DE LA CARTE (14/11/2026, go de Brice, commite NON pousse, branche paypal-smt depuis origin/master 1767fae ; aucune migration)
 
 - Le tunnel PayPal du 10% Club vend une 3e offre : OFFRES_PAYPAL.smt (club-paypal-pur.ts), offre academie

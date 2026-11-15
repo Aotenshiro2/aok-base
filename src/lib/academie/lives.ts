@@ -10,6 +10,14 @@
 // Migration du workspace : 20261113200000_academie_lives.sql (tables fermees
 // au navigateur, aok_lives_entre deplie les series a l'heure de Paris).
 //
+// (15/11/2026, cartes 378 et 379, migration 20261115120000_academie_lives_programme.sql)
+// Les lives du Live Club viennent du PROGRAMME de la semaine (l'image de Mel
+// dans Annonce), poses par la tache scripts/lives-programme.mjs
+// (lives-programme.ts) comme lives ponctuels, cree_par = 'programme'. Chaque
+// live porte un REPLAY (lecon de Rediffusion des Lives ou lien YouTube) : la
+// page montre les lives des 4 dernieres semaines avec « Voir le replay », le
+// cockpit le colle ou le corrige (action 'replay').
+//
 // LA REGLE DU LIEN (question posee a Brice le 13/11, construite sur la reco) :
 //   - la liste des lives est lisible par tous, connecte ou non ;
 //   - le LIEN ne part qu'a un compte qui y a droit selon le niveau du live :
@@ -44,10 +52,11 @@ export const NIVEAUX: readonly NiveauAcces[] = ['tous', 'programme', 'live_club'
 
 /** Le lien s'affiche 30 minutes avant le debut (reco a Brice). */
 export const AVANCE_LIEN_MIN = 30
-/** La page d'un membre montre les 4 semaines qui viennent. */
+/** La page d'un membre montre les 4 semaines qui viennent, et (15/11, carte 378) les lives des 4 dernieres semaines avec leur replay. */
 export const HORIZON_MEMBRE_JOURS = 28
-/** Le cockpit montre 3 jours en arriere (un live d'hier, son lien) et 8 semaines devant. */
-export const COCKPIT_ARRIERE_JOURS = 3
+export const PASSE_MEMBRE_JOURS = 28
+/** Le cockpit montre 4 semaines en arriere (corriger un replay, 15/11) et 8 semaines devant. */
+export const COCKPIT_ARRIERE_JOURS = 28
 export const COCKPIT_DEVANT_JOURS = 56
 
 export const LIMITES = { titre: 120, animateur: 80, description: 600, lien: 500, dureeMin: 10, dureeMax: 600 } as const
@@ -76,6 +85,14 @@ export type LigneLive = {
   lien_le: Date | string | null
   lien_serie: boolean
   statut: string
+  // (15/11/2026, migration 20261115120000_academie_lives_programme.sql) Absents avant elle : lus comme vides.
+  replay?: string | null
+  replay_le?: Date | string | null
+  type_live?: string | null
+  a_confirmer?: boolean | null
+  horaire_a_definir?: boolean | null
+  cree_par?: string | null
+  modifie_par?: string | null
 }
 
 export const SQL_ENTRE = `select * from public.aok_lives_entre($1::timestamptz, $2::timestamptz)`
@@ -150,21 +167,44 @@ export function ouvertureLien(debut: Date | string): number {
   return ms(debut) - AVANCE_LIEN_MIN * MINUTE
 }
 
+/**
+ * La fin d'un live : debut + duree ; un live a l'horaire a definir (programme
+ * de la semaine, 15/11) touche toute sa journee de Paris (debut = minuit).
+ */
+export function finDuLive(l: Pick<LigneLive, 'debut' | 'duree_min' | 'horaire_a_definir'>): number {
+  return ms(l.debut) + (l.horaire_a_definir ? JOUR : l.duree_min * MINUTE)
+}
+
 export function etatLien(
-  l: Pick<LigneLive, 'debut' | 'duree_min' | 'acces' | 'lien' | 'statut'>,
+  l: Pick<LigneLive, 'debut' | 'duree_min' | 'acces' | 'lien' | 'statut' | 'horaire_a_definir'>,
   lecteur: Lecteur,
   maintenant: number,
 ): EtatLien {
   if (l.statut === 'annule') return 'annule'
-  const fin = ms(l.debut) + l.duree_min * MINUTE
-  if (maintenant >= fin) return 'fini'
+  if (maintenant >= finDuLive(l)) return 'fini'
   const niveau: NiveauAcces = estNiveau(l.acces) ? l.acces : 'live_club'
   const droit = aDroit(niveau, lecteur)
   if (droit === 'connexion') return 'connexion'
   if (droit === 'non') return 'ferme'
   if (droit === 'inconnu') return 'inconnu'
+  // Sans heure, aucun lien ne part : la page dit « horaire a definir ».
+  if (l.horaire_a_definir) return 'avant'
   if (maintenant < ouvertureLien(l.debut)) return 'avant'
   return l.lien ? 'pret' : 'attente'
+}
+
+/**
+ * Le replay que la page d'un membre recoit (15/11, carte 378) : le chemin d'une
+ * lecon de l'academie part a tous (la page de la lecon garde son propre
+ * acces) ; un lien YouTube ne part qu'a un compte qui a droit au live (un lien
+ * non repertorie reste reserve). Rend aussi s'il est reserve.
+ */
+export function replayPourMembre(l: Pick<LigneLive, 'replay' | 'acces'>, lecteur: Lecteur): { replay: string | null; replay_reserve: boolean } {
+  const r = lireReplay(l.replay)
+  if (!r) return { replay: null, replay_reserve: false }
+  if (r.startsWith('/academie/')) return { replay: r, replay_reserve: false }
+  const niveau: NiveauAcces = estNiveau(l.acces) ? l.acces : 'live_club'
+  return aDroit(niveau, lecteur) === 'oui' ? { replay: r, replay_reserve: false } : { replay: null, replay_reserve: true }
 }
 
 /** Ce que la page d'un membre recoit d'un live : les champs prevus, le lien dans l'etat 'pret' seulement. */
@@ -183,6 +223,12 @@ export type LiveMembre = {
   etat: EtatLien
   ouvre_le: string
   lien: string | null
+  // (15/11/2026) Le programme de la semaine et le replay.
+  type_live: string | null
+  a_confirmer: boolean
+  horaire_a_definir: boolean
+  replay: string | null
+  replay_reserve: boolean
 }
 
 export function vueMembre(l: LigneLive, lecteur: Lecteur, maintenant: number): LiveMembre | null {
@@ -191,6 +237,7 @@ export function vueMembre(l: LigneLive, lecteur: Lecteur, maintenant: number): L
   if (!debut || !Number.isFinite(l.duree_min)) return null
   const etat = etatLien(l, lecteur, maintenant)
   const deplace = prevu !== null && prevu !== debut && l.serie_id !== null
+  const { replay, replay_reserve } = replayPourMembre(l, lecteur)
   return {
     cle: l.cle,
     titre: l.titre,
@@ -198,7 +245,7 @@ export function vueMembre(l: LigneLive, lecteur: Lecteur, maintenant: number): L
     genre: estGenre(l.genre) ? l.genre : 'aok',
     description: l.description,
     debut,
-    fin: new Date(ms(debut) + l.duree_min * MINUTE).toISOString(),
+    fin: new Date(finDuLive(l)).toISOString(),
     duree_min: l.duree_min,
     statut: l.statut === 'annule' ? 'annule' : 'prevu',
     deplace_de: deplace ? prevu : null,
@@ -206,12 +253,41 @@ export function vueMembre(l: LigneLive, lecteur: Lecteur, maintenant: number): L
     etat,
     ouvre_le: new Date(ouvertureLien(debut)).toISOString(),
     lien: etat === 'pret' ? l.lien : null,
+    type_live: l.type_live ?? null,
+    a_confirmer: l.a_confirmer === true,
+    horaire_a_definir: l.horaire_a_definir === true,
+    replay,
+    replay_reserve,
   }
 }
 
-/** La fenetre lue pour un membre : ce qui n'est pas fini, jusqu'a 4 semaines. */
+/** La fenetre lue pour un membre : les 4 dernieres semaines (lives passes et leur replay) et les 4 qui viennent. */
 export function fenetreMembre(maintenant: number): { du: Date; au: Date } {
-  return { du: new Date(maintenant), au: new Date(maintenant + HORIZON_MEMBRE_JOURS * JOUR) }
+  return { du: new Date(maintenant - PASSE_MEMBRE_JOURS * JOUR), au: new Date(maintenant + HORIZON_MEMBRE_JOURS * JOUR) }
+}
+
+/**
+ * Un replay : le chemin d'une lecon de l'academie (/academie/<module>/<lecon>,
+ * ou la meme adresse sur aoknowledge.com) ou un lien YouTube (youtube.com,
+ * youtu.be), https, sans identifiants. Rend la forme rangee en base, ou null.
+ */
+export function lireReplay(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const brut = v.trim()
+  if (!brut || brut.length > LIMITES.lien || /[\s<>"'`\\]/.test(brut) || UN_INVISIBLE.test(brut)) return null
+  const CHEMIN = /^\/academie\/[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/
+  if (brut.startsWith('/')) return CHEMIN.test(brut) ? brut : null
+  let u: URL
+  try { u = new URL(brut) } catch { return null }
+  if (u.protocol !== 'https:' || u.username || u.password || u.port) return null
+  const h = u.hostname.toLowerCase()
+  if (h === 'aoknowledge.com' || h === 'www.aoknowledge.com') {
+    const chemin = u.pathname.replace(/\/$/, '')
+    return CHEMIN.test(chemin) && !u.search && !u.hash ? chemin : null
+  }
+  if (!['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be'].includes(h)) return null
+  if (u.pathname === '/' || u.pathname === '') return null
+  return u.href.length <= LIMITES.lien ? u.href : null
 }
 
 export function fenetreCockpit(maintenant: number): { du: Date; au: Date } {
@@ -335,6 +411,10 @@ export type ChampsLive = {
   duree_min: number
   acces: NiveauAcces
   lien: string | null
+  // (15/11/2026) Le type lu sur le programme et ses deux mentions, corrigeables a la main.
+  type_live: string | null
+  a_confirmer: boolean
+  horaire_a_definir: boolean
 }
 
 export type DemandeEquipe =
@@ -351,10 +431,11 @@ export type DemandeEquipe =
   | { action: 'retablir'; cible: Cible }
   | { action: 'deplacer'; cible: Cible; debut: string | null; duree_min: number | null }
   | { action: 'texte_date'; cible: Cible; titre: string | null; description: string | null }
+  | { action: 'replay'; cible: Cible; replay: string | null }
 
 export type ErreurDemande =
   | 'action' | 'id' | 'cible' | 'titre' | 'animateur' | 'genre' | 'description' | 'jours' | 'heure' | 'duree'
-  | 'semaines' | 'debut' | 'fin' | 'acces' | 'lien'
+  | 'semaines' | 'debut' | 'fin' | 'acces' | 'lien' | 'replay' | 'type'
 
 export const TEXTE_ERREUR: Record<ErreurDemande, string> = {
   action: 'Action inconnue.',
@@ -372,6 +453,8 @@ export const TEXTE_ERREUR: Record<ErreurDemande, string> = {
   fin: 'Date de fin invalide (après le début).',
   acces: "Niveau d'accès inconnu (tous, programme, Live Club).",
   lien: 'Lien refusé : une adresse https:// complète, sans espace ni identifiants.',
+  replay: "Replay refusé : l'adresse d'une leçon de l'académie (/academie/module/lecon) ou un lien YouTube.",
+  type: 'Type trop long (60 caractères au plus).',
 }
 
 function lireCible(v: unknown): Cible | null {
@@ -440,8 +523,10 @@ function lireLive(v: unknown, maintenant: number): { live: ChampsLive } | { erre
   if (!debut) return { erreur: 'debut' }
   const d = duree(o.duree_min)
   if (d === null) return { erreur: 'duree' }
+  const type = texteLigne(o.type_live, 60)
+  if (type === 'trop_long') return { erreur: 'type' }
   const communs = { titre: c.titre, animateur: c.animateur, genre: c.genre, description: c.description, acces: c.acces, lien: c.lien }
-  return { live: { ...communs, debut, duree_min: d } }
+  return { live: { ...communs, debut, duree_min: d, type_live: type, a_confirmer: o.a_confirmer === true, horaire_a_definir: o.horaire_a_definir === true } }
 }
 
 /** Lit le corps de POST /api/cockpit/lives. Tout ce qui n'est pas prevu est ignore. */
@@ -521,6 +606,13 @@ export function lireDemandeEquipe(corps: unknown, maintenant: number): DemandeEq
       if (titre === null && 'id' in cible) return { erreur: 'titre' }
       return { action: 'texte_date', cible, titre, description }
     }
+    case 'replay': {
+      const cible = lireCible(o.cible)
+      if (!cible) return { erreur: 'cible' }
+      if (o.replay == null || (typeof o.replay === 'string' && !o.replay.trim())) return { action: 'replay', cible, replay: null }
+      const r = lireReplay(o.replay)
+      return r ? { action: 'replay', cible, replay: r } : { erreur: 'replay' }
+    }
     default:
       return { erreur: 'action' }
   }
@@ -589,6 +681,16 @@ export type LiveCockpit = {
   statut: StatutLive
   deplace: boolean
   ouvre_le: string
+  // (15/11/2026) Le programme de la semaine et le replay.
+  replay: string | null
+  replay_le: string | null
+  type_live: string | null
+  a_confirmer: boolean
+  horaire_a_definir: boolean
+  /** programme : pose par la tache du programme ; main : saisi dans le cockpit (ou la migration). */
+  origine: 'programme' | 'main'
+  /** Une ligne du programme modifiee a la main : la tache ne la remet plus a jour. */
+  touche_main: boolean
 }
 
 export function vueSerieCockpit(s: SerieLue, libelles: Map<string, string>): SerieCockpit {
@@ -627,7 +729,7 @@ export function vueLiveCockpit(l: LigneLive): LiveCockpit | null {
     description: l.description,
     debut,
     debut_prevu: prevu,
-    fin: new Date(ms(debut) + l.duree_min * MINUTE).toISOString(),
+    fin: new Date(finDuLive(l)).toISOString(),
     duree_min: l.duree_min,
     acces: estNiveau(l.acces) ? l.acces : 'live_club',
     lien: l.lien,
@@ -636,6 +738,13 @@ export function vueLiveCockpit(l: LigneLive): LiveCockpit | null {
     statut: l.statut === 'annule' ? 'annule' : 'prevu',
     deplace: l.serie_id !== null && prevu !== debut,
     ouvre_le: new Date(ouvertureLien(debut)).toISOString(),
+    replay: l.replay ?? null,
+    replay_le: iso(l.replay_le),
+    type_live: l.type_live ?? null,
+    a_confirmer: l.a_confirmer === true,
+    horaire_a_definir: l.horaire_a_definir === true,
+    origine: l.serie_id === null && l.cree_par === 'programme' ? 'programme' : 'main',
+    touche_main: l.serie_id === null && l.cree_par === 'programme' && l.modifie_par != null && l.modifie_par !== 'programme',
   }
 }
 
@@ -675,26 +784,30 @@ returning id::text`
 
 export const SQL_SUPPRIMER_SERIE = `delete from public.academie_lives_series where id = $1::uuid returning id::text`
 
-const COLONNES_LIVE = `titre, animateur, genre, description, debut, duree_min, acces, lien, lien_le`
-const VALEURS_LIVE = `$1::text, $2::text, $3::text, $4::text, $5::timestamptz, $6::int, $7::text, $8::text, case when $8::text is null then null else now() end`
+// (15/11/2026) type_live, a_confirmer et horaire_a_definir : colonnes de la migration
+// 20261115120000 (a appliquer AVANT de pousser ce code).
+const COLONNES_LIVE = `titre, animateur, genre, description, debut, duree_min, acces, lien, lien_le, type_live, a_confirmer, horaire_a_definir`
+const VALEURS_LIVE = `$1::text, $2::text, $3::text, $4::text, $5::timestamptz, $6::int, $7::text, $8::text, case when $8::text is null then null else now() end, $10::text, $11::boolean, $12::boolean`
 
 export const SQL_CREER_LIVE = `
 insert into public.academie_lives (${COLONNES_LIVE}, cree_par, modifie_par)
 values (${VALEURS_LIVE}, $9::text, $9::text)
 returning id::text`
 
-/** Le lien_le ne bouge que si le lien change. */
+/** Le lien_le ne bouge que si le lien change. Un live du programme modifie ici passe « a la main » (modifie_par). */
 export const SQL_MODIFIER_LIVE = `
 update public.academie_lives
    set titre = $1::text, animateur = $2::text, genre = $3::text, description = $4::text, debut = $5::timestamptz,
        duree_min = $6::int, acces = $7::text,
        lien_le = case when $8::text is null then null when lien is distinct from $8::text then now() else lien_le end,
        lien = $8::text,
+       type_live = $10::text, a_confirmer = $11::boolean, horaire_a_definir = $12::boolean,
        modifie_le = now(), modifie_par = $9::text
- where id = $10::uuid and serie_id is null
+ where id = $13::uuid and serie_id is null
 returning id::text`
 
-export const valeursLive = (l: ChampsLive, par: string) => [l.titre, l.animateur, l.genre, l.description, l.debut, l.duree_min, l.acces, l.lien, par]
+export const valeursLive = (l: ChampsLive, par: string) =>
+  [l.titre, l.animateur, l.genre, l.description, l.debut, l.duree_min, l.acces, l.lien, par, l.type_live, l.a_confirmer, l.horaire_a_definir]
 
 export const SQL_SUPPRIMER_LIVE = `delete from public.academie_lives where id = $1::uuid and serie_id is null returning id::text`
 
@@ -742,7 +855,16 @@ update public.academie_lives set titre = $2::text, description = $4::text, modif
  where id = $1::uuid and serie_id is null
 returning id::text`
 
-/** La requete et ses valeurs pour un geste sur une date (lien, annuler, retablir, deplacer, texte_date). */
+/** (15/11/2026) Le replay d'une date, colle ou corrige a la main (null : retire). */
+export const SQL_REPLAY_SERIE = exception(['replay', 'replay_le'], ['$4::text', 'case when $4::text is null then null else now() end'],
+  'replay = excluded.replay, replay_le = excluded.replay_le')
+export const SQL_REPLAY_PONCTUEL = `
+update public.academie_lives set replay = $2::text, replay_le = case when $2::text is null then null else now() end,
+       modifie_le = now(), modifie_par = $3::text
+ where id = $1::uuid and serie_id is null
+returning id::text`
+
+/** La requete et ses valeurs pour un geste sur une date (lien, annuler, retablir, deplacer, texte_date, replay). */
 export function requeteDate(d: Extract<DemandeEquipe, { cible: Cible }>, par: string): { sql: string; valeurs: unknown[] } {
   const serie = 'serie_id' in d.cible
   const tete = serie ? [(d.cible as { serie_id: string }).serie_id, (d.cible as { date_serie: string }).date_serie, par] : null
@@ -763,11 +885,19 @@ export function requeteDate(d: Extract<DemandeEquipe, { cible: Cible }>, par: st
       return serie
         ? { sql: SQL_TEXTE_SERIE, valeurs: [...tete!, d.titre, d.description] }
         : { sql: SQL_TEXTE_PONCTUEL, valeurs: [id, d.titre, par, d.description] }
+    case 'replay':
+      return serie
+        ? { sql: SQL_REPLAY_SERIE, valeurs: [...tete!, d.replay] }
+        : { sql: SQL_REPLAY_PONCTUEL, valeurs: [id, d.replay, par] }
   }
 }
 
-/** Les tables ou les fonctions de la migration manquent (code deploye avant elle). */
+/**
+ * Les tables, les fonctions ou les colonnes d'une migration manquent (code
+ * deploye avant elle) : 42P01 table, 42883 fonction, 42703 colonne (replay,
+ * type_live... de 20261115120000).
+ */
 export function migrationAbsente(err: unknown): boolean {
   const m = err instanceof Error ? err.message : String(err)
-  return /42P01|42883|relation .* does not exist|function public\.aok_lives_\w+\(.*\) does not exist/i.test(m)
+  return /42P01|42883|42703|relation .* does not exist|function public\.aok_lives_\w+\(.*\) does not exist|column .* does not exist/i.test(m)
 }

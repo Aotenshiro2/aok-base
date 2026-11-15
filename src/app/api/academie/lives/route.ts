@@ -19,6 +19,12 @@ import {
  * est dans la fenetre (30 minutes avant le debut, jusqu'a la fin).
  * Corps : {} ou { action: 'lire' }.
  *
+ * (15/11/2026, carte 378) La reponse couvre aussi les 4 dernieres semaines
+ * (etat 'fini') avec leur replay : le chemin d'une lecon part a tous (la lecon
+ * garde son acces), un lien YouTube seulement a un compte qui a droit au live
+ * (replayPourMembre). Les lives du programme de la semaine portent type_live,
+ * a_confirmer et horaire_a_definir.
+ *
  * 200 { ok: true, lives: LiveMembre[], maintenant, connecte, live_club } ;
  * 400 action ; 401 jeton present mais refuse ; 503 base (code 'migration' si
  * les tables manquent : la page dit « le calendrier arrive bientot »).
