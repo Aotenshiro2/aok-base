@@ -10,6 +10,9 @@ import type { ProgressionLecon } from './suivi'
 
 const iso = (d: Date | null | undefined) => d?.toISOString() ?? null
 
+/** L'etat d'une lecon : celui calcule avec la ligne (nb_sessions compris, 15/11/2026), sinon non_vu. */
+const etatDe = (p: ProgressionLecon | undefined) => (p ? p.etat : etatLecon(p))
+
 function progressionPublique(p: ProgressionLecon | undefined) {
   if (!p) return null
   return {
@@ -76,7 +79,7 @@ export function construire(catalogue: Catalogue, droits: Droits, progression: Ma
     const acces = ouvertureModule(droits, m.id, publiees.map(j => j.r))
     // Pourcentage sur les lecons que l'eleve a le droit de voir (Brice, 15/10/2026) : un membre du Live Club
     // atteint 100 % une fois sa partie finie, le cadenas montre la suite. Sans lecon ouverte, sur toutes.
-    const suivi = progressionDuModule(publiees.map(j => ({ acces: j.r.acces, etat: etatLecon(progression.get(j.l.id)) })))
+    const suivi = progressionDuModule(publiees.map(j => ({ acces: j.r.acces, etat: etatDe(progression.get(j.l.id)) })))
 
     return {
       id: m.id,
@@ -114,7 +117,7 @@ export function construire(catalogue: Catalogue, droits: Droits, progression: Ma
         lisible,
         acces: r.acces,
         raisons: r.raisons,
-        etat: etatLecon(progression.get(l.id)),
+        etat: etatDe(progression.get(l.id)),
         progression: progressionPublique(progression.get(l.id)),
         // (11/11/2026) Rediffusion des Lives : date, type, organisations, intervenants. Absent hors des lives.
         ...(l.live ? { live: l.live } : {}),
@@ -129,6 +132,8 @@ export function construire(catalogue: Catalogue, droits: Droits, progression: Ma
   for (const p of progression.values()) {
     const l = leconsParId.get(p.leconId)
     if (!l) continue
+    // (15/11/2026) Une lecon cochee par « Deja vu avant » et jamais ouverte n'est pas une derniere lecon ouverte.
+    if (p.nbSessions === 0) continue
     if (!derniere || p.derniereVueLe > derniere.p.derniereVueLe) derniere = { p, l }
   }
   let continuer = null

@@ -279,6 +279,8 @@ select ${COLONNES_LECON}
  * Un lien vient d'etre delivre : la progression est creee ou rafraichie
  * (derniere_vue_le ; une nouvelle session si la precedente date de plus de 30
  * minutes) et le journal note l'evenement 'lien'. Rend la progression.
+ * (15/11/2026) Une ligne posee par une reprise (nb_sessions = 0, jamais
+ * ouverte) compte sa premiere ouverture quelle que soit l'heure de la reprise.
  */
 export const SQL_NOTER_LIEN = `
 with prog as (
@@ -286,10 +288,10 @@ with prog as (
   values ($1::uuid, $2::uuid, now(), 1)
   on conflict (user_id, lecon_id) do update set
     nb_sessions = p.nb_sessions
-      + case when p.derniere_vue_le < now() - interval '30 minutes' then 1 else 0 end,
+      + case when p.nb_sessions = 0 or p.derniere_vue_le < now() - interval '30 minutes' then 1 else 0 end,
     derniere_vue_le = now()
   returning p.derniere_position_s, p.position_max_s, p.secondes_vues, p.pourcentage,
-            p.terminee_le, p.marquee_vue_le, p.vu_le, p.vu_par
+            p.terminee_le, p.marquee_vue_le, p.vu_le, p.vu_par, p.nb_sessions
 ), journal as (
   insert into public.academie_lectures (user_id, lecon_id, evenement, ip, appareil)
   values ($1::uuid, $2::uuid, 'lien', $3::inet, $4::text)
@@ -315,7 +317,7 @@ values ($1::uuid, $2::uuid, 'ressource', $3::text, $4::inet, $5::text)
 /** $1 = compte, $2 = lecon. L'etat d'une progression pour appliquer un signal, avec l'heure de la base. */
 export const SQL_ETAT_SIGNAL = `
 select p.position_max_s, p.derniere_position_s, p.secondes_vues, p.pourcentage, p.terminee_le,
-       p.marquee_vue_le, p.vu_le, p.derniere_vue_le, p.dernier_signal_le, p.nb_signaux,
+       p.marquee_vue_le, p.vu_le, p.derniere_vue_le, p.dernier_signal_le, p.nb_signaux, p.nb_sessions,
        l.type, l.duree_s, l.statut, now() as maintenant
   from public.academie_progression p
   join public.academie_lecons l on l.id = p.lecon_id
@@ -332,7 +334,7 @@ select p.position_max_s, p.derniere_position_s, p.secondes_vues, p.pourcentage, 
  */
 export const SQL_ETAT_SIGNAL_PROFONDEUR = `
 select p.position_max_s, p.derniere_position_s, p.secondes_vues, p.pourcentage, p.terminee_le,
-       p.marquee_vue_le, p.vu_le, p.derniere_vue_le, p.dernier_signal_le, p.nb_signaux,
+       p.marquee_vue_le, p.vu_le, p.derniere_vue_le, p.dernier_signal_le, p.nb_signaux, p.nb_sessions,
        p.profondeur_max,
        case when l.type = 'texte' and l.contenu is not null
             then (select count(*)::int from regexp_matches(l.contenu, '[^[:space:]]+', 'g'))
@@ -385,7 +387,7 @@ with maj as (
     nb_signaux = p.nb_signaux + 1
   where p.user_id = $1::uuid and p.lecon_id = $2::uuid and p.nb_signaux = $3::int
   returning p.position_max_s, p.derniere_position_s, p.secondes_vues, p.pourcentage,
-            p.terminee_le, p.marquee_vue_le, p.vu_le, p.vu_par
+            p.terminee_le, p.marquee_vue_le, p.vu_le, p.vu_par, p.nb_sessions
 ), journal as (
   insert into public.academie_lectures (user_id, lecon_id, evenement, secondes, position_s, ip, appareil)
   select $1::uuid, $2::uuid, $10::text, $11::int, $12::int, $13::inet, $14::text from maj
@@ -409,10 +411,10 @@ select $1::uuid, 'connexion', $2::inet, $3::text
  )
 `
 
-/** $1 = compte. Toute la progression du compte. */
+/** $1 = compte. Toute la progression du compte (nb_sessions = 0 : posee par une reprise, jamais ouverte). */
 export const SQL_PROGRESSION_COMPTE = `
 select p.lecon_id::text as lecon_id, p.position_max_s, p.derniere_position_s, p.secondes_vues,
-       p.pourcentage, p.terminee_le, p.marquee_vue_le, p.vu_le, p.vu_par, p.derniere_vue_le
+       p.pourcentage, p.terminee_le, p.marquee_vue_le, p.vu_le, p.vu_par, p.derniere_vue_le, p.nb_sessions
   from public.academie_progression p
  where p.user_id = $1::uuid
 `

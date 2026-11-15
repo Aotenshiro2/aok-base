@@ -570,13 +570,23 @@ export const SEUIL_VU = 0.6
  */
 export type EtatLecon = 'non_vu' | 'ouvert' | 'en_cours' | 'vu'
 
-/** La voie qui a pose « vu » (colonne vu_par). */
-export type VuPar = 'mesure' | 'fin' | 'texte_fin' | 'eleve'
+/**
+ * La voie qui a pose « vu » (colonne vu_par). 'reprise' (15/11/2026, migration
+ * 20261115180000) : cochee d'un coup par « Deja vu avant » (reprise.ts), sans
+ * preuve (terminee_le) ni clic (marquee_vue_le) : ni points, ni temps de visionnage.
+ */
+export type VuPar = 'mesure' | 'fin' | 'texte_fin' | 'eleve' | 'reprise'
 
-export function etatLecon(p: { secondesVues: number; vuLe: Date | null } | null | undefined): EtatLecon {
+/**
+ * nbSessions (15/11/2026) : 0 = ligne creee par une reprise, lecon jamais
+ * ouverte. Decochee, elle redevient « non_vu » (et non « ouvert »). Absent =
+ * regle d'avant (une ligne = une ouverture).
+ */
+export function etatLecon(p: { secondesVues: number; vuLe: Date | null; nbSessions?: number } | null | undefined): EtatLecon {
   if (!p) return 'non_vu'
   if (p.vuLe) return 'vu'
-  return p.secondesVues > 0 ? 'en_cours' : 'ouvert'
+  if (p.secondesVues > 0) return 'en_cours'
+  return p.nbSessions === 0 ? 'non_vu' : 'ouvert'
 }
 
 export type EtatSuivi = {
@@ -602,6 +612,12 @@ export type EtatSuivi = {
   profondeurMax?: number | null
   /** Nombre de mots du contenu (lecon ecrite) ; null sinon. */
   mots?: number | null
+  /**
+   * (15/11/2026) Ouvertures de la lecon. 0 = ligne posee par une reprise, aucun
+   * lien delivre : seul « vu » (le decochage) passe, le reste attend /lecture.
+   * Absent = regle d'avant.
+   */
+  nbSessions?: number
 }
 
 export type MiseAJourSuivi = {
@@ -656,6 +672,8 @@ export function appliquerSignal(etat: EtatSuivi, signal: Signal): IssueSignal {
   if (ev !== 'vu' && maintenant - etat.derniereVueLe.getTime() > FRAICHEUR_LIEN_H * 3600_000) {
     return { refus: 'lien' }
   }
+  // (15/11/2026) Ligne posee par une reprise, jamais ouverte : aucun lien delivre, donc aucun temps a crediter.
+  if (ev !== 'vu' && etat.nbSessions === 0) return { refus: 'lien' }
   if (etat.dernierSignalLe) {
     const ecart = (maintenant - etat.dernierSignalLe.getTime()) / 1000
     if (ecart < ECART_MIN_S[ev]) {

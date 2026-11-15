@@ -31,7 +31,13 @@ export type Progression = {
   marqueeVueLe: Date | null
   vuLe: Date | null
   vuPar: VuPar | null
-  /** Une ligne existe, donc jamais non_vu ici : ouvert, en_cours ou vu. */
+  /**
+   * Ouvertures de la lecon (15/11/2026). 0 = ligne posee par une reprise (« Deja
+   * vu avant »), jamais ouverte : ni « Continuer », ni signal de lecture.
+   * null = colonne non rendue (requete d'avant).
+   */
+  nbSessions: number | null
+  /** Une ligne existe : ouvert, en_cours ou vu ; non_vu seulement pour une reprise decochee jamais ouverte. */
   etat: EtatLecon
 }
 
@@ -40,9 +46,11 @@ export type ProgressionLecon = Progression & { leconId: string; derniereVueLe: D
 type LigneProgression = {
   derniere_position_s: number; position_max_s: number; secondes_vues: number; pourcentage: number | null
   terminee_le: Date | null; marquee_vue_le: Date | null; vu_le: Date | null; vu_par: VuPar | null
+  nb_sessions?: number | null
 }
 
 function progressionDeLigne(l: LigneProgression): Progression {
+  const nbSessions = typeof l.nb_sessions === 'number' ? l.nb_sessions : null
   return {
     dernierePositionS: l.derniere_position_s,
     positionMaxS: l.position_max_s,
@@ -52,7 +60,8 @@ function progressionDeLigne(l: LigneProgression): Progression {
     marqueeVueLe: l.marquee_vue_le,
     vuLe: l.vu_le,
     vuPar: l.vu_par,
-    etat: etatLecon({ secondesVues: l.secondes_vues, vuLe: l.vu_le }),
+    nbSessions,
+    etat: etatLecon({ secondesVues: l.secondes_vues, vuLe: l.vu_le, nbSessions: nbSessions ?? undefined }),
   }
 }
 
@@ -93,7 +102,7 @@ export type IssueEnregistrement =
 type LigneEtat = {
   position_max_s: number; derniere_position_s: number; secondes_vues: number; pourcentage: number | null
   terminee_le: Date | null; marquee_vue_le: Date | null; vu_le: Date | null; derniere_vue_le: Date; dernier_signal_le: Date | null
-  nb_signaux: number; type: TypeLecon; duree_s: number | null; statut: string; maintenant: Date
+  nb_signaux: number; nb_sessions?: number | null; type: TypeLecon; duree_s: number | null; statut: string; maintenant: Date
   /** SQL_ETAT_SIGNAL_PROFONDEUR seulement. */
   profondeur_max?: number; mots?: number | null
 }
@@ -148,6 +157,8 @@ export async function enregistrerSignal(
     maintenant: e.maintenant,
     profondeurMax: profondeur ? e.profondeur_max ?? 0 : null,
     mots: profondeur ? e.mots ?? null : null,
+    // (15/11/2026) 0 = posee par une reprise, jamais ouverte : appliquerSignal ne credite rien sans lien.
+    nbSessions: typeof e.nb_sessions === 'number' ? e.nb_sessions : undefined,
   }
   const issue = appliquerSignal(etat, signal)
   if (!('maj' in issue)) return { issue: 'refus', detail: issue }

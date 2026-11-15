@@ -1,0 +1,14 @@
+﻿skool_member_id;prenom;nom;email;email_source;statut_skool;rejoint_skool;cours_skool_id;cours_titre;lecons_terminees;lecons_total;pourcentage;a_acces
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01;Lina;Fictive;Lina.Fictive@exemple.test;export-officiel-11-11-par-nom;actif;2025-03-02;37e96d438ae74ba89cfed1802431abbb;La formation - Partie 1;30;42;71;1
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01;Lina;Fictive;Lina.Fictive@exemple.test;export-officiel-11-11-par-nom;actif;2025-03-02;db9ea221835b43bc96e52e162cfa3559;La formation - Partie 2;10;42;24;1
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01;Lina;Fictive;Lina.Fictive@exemple.test;export-officiel-11-11-par-nom;actif;2025-03-02;24f3805eb884446b95190f1289fdf382;Initiation Skool;8;8;100;1
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01;Lina;Fictive;Lina.Fictive@exemple.test;export-officiel-11-11-par-nom;actif;2025-03-02;b80022a238bf4e878c420016b3d313ad;Tape Reading;0;0;;1
+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb02;Noe;Invente;;aucune;actif;2025-09-14;a8ce77d4d50147bd9e97badd28baebec;Novice en trading;3;7;43;1
+cccccccccccccccccccccccccccccc03;Sam;Homonyme;sam.homonyme@exemple.test;ambigu-plusieurs-homonymes;actif;2024-12-01;2fa73af4e8dc4bc089b95fb55510f7bc;Liveclub;4;4;100;1
+dddddddddddddddddddddddddddddd04;Zoe;Debut;zoe.debut@exemple.test;export-07-11;actif;2026-10-30;a8ce77d4d50147bd9e97badd28baebec;Novice en trading;0;7;0;1
+dddddddddddddddddddddddddddddd04;Zoe;Debut;zoe.debut@exemple.test;export-07-11;actif;2026-10-30;2fa73af4e8dc4bc089b95fb55510f7bc;Liveclub;0;4;0;0
+eeeeeeeeeeeeeeeeeeeeeeeeeeeeee05;Tom;Parti;tom.parti@exemple.test;export-officiel-11-11-par-nom;parti;2024-06-10;d7be803d71994500b765073a16acbdaf;Replay Premium;22;22;100;1
+eeeeeeeeeeeeeeeeeeeeeeeeeeeeee05;Tom;Parti;tom.parti@exemple.test;export-officiel-11-11-par-nom;parti;2024-06-10;da8fce017cfa4f308106ab268e2193c1;"Rediffusion des Lives";5;31;16;1
+ffffffffffffffffffffffffffffff06;Ana;Sansadresse;pas-une-adresse;export-07-11;actif;2026-01-05;a8ce77d4d50147bd9e97badd28baebec;Novice en trading;1;7;14;1
+pas-un-id;Bad;Ligne;bad@exemple.test;export-07-11;actif;2026-01-05;a8ce77d4d50147bd9e97badd28baebec;Novice en trading;1;7;14;1
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01;Lina;Fictive;Lina.Fictive@exemple.test;export-officiel-11-11-par-nom;actif;2025-03-02;a8ce77d4d50147bd9e97badd28baebec;Novice en trading;9;7;100;1

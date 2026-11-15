@@ -572,10 +572,13 @@ export async function ficheMembrePourRelais(relaisId: number, entree: unknown, d
           count(*) filter (where dit_le > now() - interval '30 days')::int as trente
         from public.cockpit_telegram_messages where telegram_id::text = any(${tgIds}::text[])`
       // L'academie : par l'email du rattachement, relie au compte du site. Seulement des comptes, jamais l'email.
+      // (15/11/2026) Les lecons cochees par « Deja vu avant » (vu_par 'reprise', nb_sessions 0 tant qu'elles ne
+      // sont pas ouvertes) ne sont ni commencees ni terminees : le relais ne parle que de ce qui a ete regarde.
       const [aca] = await db.$queryRaw<{ commencees: number; terminees: number; derniere: Date | null }[]>`
-        select count(*)::int as commencees,
-          count(*) filter (where p.terminee_le is not null or p.vu_le is not null)::int as terminees,
-          max(p.derniere_vue_le) as derniere
+        select count(*) filter (where p.nb_sessions > 0)::int as commencees,
+          count(*) filter (where p.terminee_le is not null
+                              or (p.vu_le is not null and p.vu_par is distinct from 'reprise'))::int as terminees,
+          max(p.derniere_vue_le) filter (where p.nb_sessions > 0) as derniere
         from public.academie_progression p
         where p.user_id in (
           select u.id from auth.users u join public.cockpit_liveclub_rattachements r on lower(u.email) = lower(r.email)

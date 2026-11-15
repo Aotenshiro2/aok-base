@@ -1,5 +1,46 @@
 # ETAT du journal d etudes
 
+## REPRISE DE LA PROGRESSION DES MEMBRES DE SKOOL : « DEJA VU AVANT » ET IMPORT DU RELEVE (15/11/2026, carte 382, commite NON pousse, branche academie-reprise-progression depuis origin/master a2c18b6 ; migration 20261115180000 du workspace ECRITE NON appliquee)
+
+- Briefs : D:\7_Agents\briefs\2026-11-15-academie-reprise-progression-skool.md et ...-codeur.md (mise a jour du 15/11
+  apres-midi : le releve de Yume). Rapport : D:\7_Agents\briefs\academie-reprise-progression-rapport.md. Site et Cockpit :
+  branche academie-reprise-progression du workspace. REGLE PAR DEFAUT DE YUME, A FAIRE VALIDER PAR BRICE avant la mise en ligne.
+- POST /api/academie/reprise { module, section? } (jeton, CORS de l'academie, 1 appel / 3 s par compte et par instance,
+  20 reprises / heure en base). Le serveur decide (reprise-pur.ts, planReprise) : historique (au moins une lecon terminee
+  dans le releve de Skool d'un membre de Skool RATTACHE au compte, par adresse verifiee non ambigue ou a la main ; ou
+  ancien IziTrade/LearnyBox actif dans aok_anciens_membres), fenetre (REPRISE_JOURS = 30 apres la premiere trace dans
+  academie_lectures, jamais avant REPRISE_DEPUIS = 16/11 minuit Paris), une fois par cours (REPRISE_UNE_FOIS_PAR = 'cours' :
+  le cours entier OU une partie, tenu par l'index unique academie_reprises (user_id, verrou)), droits (lecons publiees que
+  le compte a pour de vrai, pas apercu ni billet ; un droit 'inconnu' = 503). Ecrit (une transaction) : academie_reprises
+  d'abord, puis les lecons (vu_par = 'reprise', vu_le ; NI terminee_le NI marquee_vue_le : aok_activite_par_jour ne les
+  compte pas, aucun point ; nb_sessions = 0 pour une lecon jamais ouverte), puis la liste des lecons cochees. Les lecons
+  deja vues autrement ne sont jamais touchees (where p.vu_le is null).
+- nb_sessions = 0 = jamais ouverte : etatLecon rend non_vu apres un decochage (pas « ouvert ») ; appliquerSignal refuse
+  tout signal sauf 'vu' ('lien', la page redemande /lecture) ; SQL_NOTER_LIEN compte la premiere ouverture quelle que soit
+  l'heure ; « Continuer » (vue-moi) ignore ces lignes. Le decochage passe par /suivi { evenement: 'vu', vu: false }, inchange.
+- /moi rend reprise { possible, historique, jusquau, une_fois_par, faites } (null si illisible ou migration absente : pas
+  de bouton, /moi ne tombe pas) et skool { pourcentage, terminees, total, releve_le } par module et par section
+  (correspondances SURES seulement, plusieurs cours = total des lecons terminees sur total des lecons).
+- Correspondance Skool -> academie : fichier versionne CORRESPONDANCE_SKOOL (reprise-pur.ts, ids de 32 caracteres du
+  releve). Douteux (repere cache) : Chronique de l'accelerateur, Rediffusion des Lives. Sans equivalent : Initiation Skool,
+  Articles, Replay Masterclass, Acces aux Lives.
+- Import : scripts/importer-progression-skool.mjs [releve.csv] [--cours ...] [--hors-ligne] [--ecrire]. A blanc par defaut
+  (lit la base pour compter les rattachables). Sortie : des nombres, jamais une adresse ni un nom. --ecrire : membres,
+  releve par cours, puis rattachement PAR EMAIL seulement (SQL_RATTACHER_PAR_EMAIL, rejouable). A blanc sur le vrai releve
+  le 15/11 : 399 membres, 186 avec historique (118 avec adresse, 68 sans), 30 avec historique ont deja un compte a leur
+  adresse. NON lance avec --ecrire.
+- Lecteurs revus : relais.ts (une reprise n'est ni commencee ni terminee), agent-cockpit.ts et tab/generique.ts (vu_par
+  reprise et les trois tables decrits). Points, classement, cloche, emails, quiz, fin de module : rien ne lit vu_le/vu_par
+  pour declencher quoi que ce soit (rapport).
+- Verifs : node scripts/verifier-reprise.mjs (15 blocs hors ligne), verifier-academie --hors-ligne (54 blocs),
+  verifier-academie-cockpit-rls (ok), essayer-migration-reprise.mjs (8 etapes, transaction ANNULEE, 3,3 s, rien ne reste,
+  aucune insertion dans academie_lectures), tsc, eslint des fichiers, next build.
+- MISE EN LIGNE, sur go de Brice : (1) essai, puis migration 20261115180000 ; (2) importer-progression-skool.mjs --ecrire ;
+  (3) push du journal ; (4) push du site (le bouton ne s'affiche que si /moi rend reprise) ; (5) cockpit, a la main.
+  A refaire de temps en temps : le rattachement par email des nouveaux arrives (relancer l'import, rejouable).
+- Pas fait : effacement d'une personne (cockpit_effacer ne connait pas les trois tables) ; rattachement a la main depuis
+  le cockpit (volet 3, le modele le permet : rattache_mode/par/le, academie_reprises mode equipe).
+
 ## LIVES DU PROGRAMME DE LA SEMAINE, LIEN AVANT CHAQUE LIVE, REPLAY LE LENDEMAIN (15/11/2026, FEATURE, cartes 378 et 379 en A, commite NON pousse, branche academie-lives-programme depuis origin/master a2c18b6 ; migration du workspace 20261115120000 ECRITE NON appliquee)
 
 - Brief : D:\7_Agents\briefs\2026-11-15-academie-lives-programme-et-replays.md ; rapport academie-lives-programme-rapport.md

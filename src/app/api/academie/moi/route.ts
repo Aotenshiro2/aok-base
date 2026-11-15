@@ -5,6 +5,7 @@ import { lireCatalogue, type Catalogue } from '@/lib/academie/catalogue'
 import { construire } from '@/lib/academie/vue-moi'
 import { compteDuJeton, corsAcademie, entetesAcademie, origineDeLaRequete, refusAcademie, tronquer } from '@/lib/academie/http'
 import { etatQuestions, vueQuestions, type EtatQuestions } from '@/lib/academie/questions-entree'
+import { reperePublic, reperesDuCompte, situationReprise, vueReprise, type SituationReprise } from '@/lib/academie/reprise'
 import { noterConnexion, progressionDuCompte, type ProgressionLecon } from '@/lib/academie/suivi'
 import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
 import { soutienDuCompte, type SoutienDuCompte } from '@/lib/soutien'
@@ -39,6 +40,10 @@ import { soutienDuCompte, type SoutienDuCompte } from '@/lib/soutien'
  *     questions_entree: { poser, version, questions: [texte, texte] },   les questions d'entree (30/10/2026,
  *                           questions-entree.ts) : poser = compte non admin qui n'a ni repondu ni passe
  *                           (faux si la table est absente ou illisible : /moi ne tombe jamais pour elles)
+ *     reprise: { possible, historique, jusquau, une_fois_par, faites: [{ module_id, section_id }] } | null,
+ *                           le bouton « Deja vu avant » (15/11/2026, reprise.ts) : possible = historique (releve de
+ *                           Skool ou ancien membre) ET dans la fenetre ; faites = reprises du membre (le « une fois ») ;
+ *                           null = illisible ou migration 20261115180000 absente (pas de bouton, /moi ne tombe pas)
  *     modules: [{ id, slug, titre, resume, parcours, ordre, statut, auteur, image,
  *                 prix_eur,                 prix du module vendu seul, null = pas vendu seul
  *                 lien_externe,             https vers un autre site (Masterclass) ou null ; rempli =
@@ -51,7 +56,10 @@ import { soutienDuCompte, type SoutienDuCompte } from '@/lib/soutien'
  *                           pourcentage = part des lecons ACCESSIBLES a l'eleve a l'etat 'vu'
  *                           (toutes les publiees s'il n'en a aucune) ; accessibles = leur nombre ;
  *                           commencees = lecons ouvertes au moins une fois (ouvert, en_cours ou vu)
- *                 sections: [{ id, ordre, titre, acces, raisons }],
+ *                 skool: { pourcentage, terminees, total, releve_le } | null,   (15/11/2026) le repere du releve de
+ *                           Skool pour ce module (correspondances sures seulement, plusieurs cours = total des lecons
+ *                           terminees sur total des lecons) ; null = aucun releve pour ce module
+ *                 sections: [{ id, ordre, titre, acces, raisons, skool }],
  *                 lecons: [{ id, slug, section_id, ordre, titre, type, format, duree_s, apercu, statut,
  *                            lisible, acces, raisons,
  *                            etat: non_vu | ouvert | en_cours | vu,
@@ -107,6 +115,13 @@ export async function GET(req: NextRequest) {
     return 'indisponible' as const
   })
 
+  // (15/11/2026) Le bouton « Deja vu avant » et les reperes de Skool : une panne ou la migration absente ne fait
+  // jamais tomber /moi (pas de bouton).
+  const reprise: Promise<SituationReprise | null> = situationReprise(userId).catch((err: unknown) => {
+    if (!relationAbsente(err)) console.warn(`[academie/moi] reprise illisible compte=${tronquer(userId)} : ${messageErreur(err)}`)
+    return null
+  })
+
   let droits: DroitsAcademie
   let catalogue: Catalogue
   let progression: Map<string, ProgressionLecon>
@@ -132,7 +147,14 @@ export async function GET(req: NextRequest) {
     console.warn(`[academie/moi] droits incomplets compte=${tronquer(userId)} (${droits.erreurs.join(', ')})`)
   }
 
-  const { modules, continuer } = construire(catalogue, droits, progression)
+  const { modules: modulesBruts, continuer } = construire(catalogue, droits, progression)
+  const situation = await reprise
+  const reperes = situation ? reperesDuCompte(situation, catalogue) : null
+  const modules = modulesBruts.map(m => ({
+    ...m,
+    skool: reperePublic(reperes?.get(`module:${m.id}`)),
+    sections: m.sections.map(s => ({ ...s, skool: reperePublic(reperes?.get(`section:${s.id}`)) })),
+  }))
   return NextResponse.json(
     {
       ok: true,
@@ -146,6 +168,7 @@ export async function GET(req: NextRequest) {
       continuer,
       modules,
       questions_entree: vueQuestions(await questions, droits.admin),
+      reprise: situation ? vueReprise(situation) : null,
     },
     { headers },
   )
