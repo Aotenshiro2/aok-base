@@ -37,6 +37,13 @@
 // le teste sans base ni reseau. Les requetes SQL sont ici aussi (des chaines),
 // jouees par les routes.
 //
+// (15/11/2026, brief 2026-11-15-academie-lives-passes-simples, demande de
+// Brice : « Les anciens lives devrais etre en bas avec le bouton voir replay
+// dans sa card. On veut de la simplicite ») Les lives passes ont une seconde
+// source : les lecons PUBLIEES de Rediffusion des Lives dont le jour du live
+// (live_le) tombe dans les 4 dernieres semaines (livesDesLecons). Une lecon
+// deja posee comme replay d'un live du calendrier n'est montree qu'une fois.
+//
 // SECURITE : un titre, une description ou un lien sont des DONNEES ecrites par
 // l'equipe, rendues en texte par le site (jamais en HTML). Le lien est valide
 // ici : https seulement, sans identifiants, sans espace ni caractere de
@@ -288,6 +295,175 @@ export function lireReplay(v: unknown): string | null {
   if (!['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be'].includes(h)) return null
   if (u.pathname === '/' || u.pathname === '') return null
   return u.href.length <= LIMITES.lien ? u.href : null
+}
+
+// ---------------------------------------------------------------------------
+// Les lives passes venus de Rediffusion des Lives (15/11/2026, brief
+// 2026-11-15-academie-lives-passes-simples)
+// ---------------------------------------------------------------------------
+
+/** Le module des replays (le meme que MODULE_REPLAYS de lives-programme.ts). */
+export const MODULE_REDIFFUSION = 'rediffusion-des-lives'
+
+/** Une lecon de Rediffusion des Lives, telle que SQL_LECONS_PASSEES la rend. */
+export type LeconPassee = {
+  slug: string
+  module: string
+  titre: string
+  statut: string
+  live_le: string | null
+  /** Minuit de Paris du jour du live (calcule par la base). */
+  debut: Date | string | null
+  type: string | null
+  intervenants: string[] | null
+}
+
+/**
+ * Les lecons PUBLIEES (module publie aussi) dont le jour du live tombe dans la
+ * fenetre : $1 = le debut de la fenetre (maintenant - 4 semaines), $2 =
+ * maintenant. Le jour se lit a Paris : minuit de Paris du jour du live doit
+ * etre dans la fenetre, et le jour ne depasse pas aujourd'hui. Role postgres,
+ * comme le reste de la route ; aucune ecriture.
+ */
+export const SQL_LECONS_PASSEES = `
+select l.slug, m.slug as module, l.titre, l.statut, l.live_le::text as live_le,
+       (l.live_le::timestamp at time zone 'Europe/Paris') as debut,
+       l.live_type as type, coalesce(l.live_intervenants, '{}') as intervenants
+  from public.academie_lecons l
+  join public.academie_modules m on m.id = l.module_id
+ where m.slug = '${MODULE_REDIFFUSION}' and m.statut = 'publie' and l.statut = 'publie'
+   and l.live_le is not null
+   and (l.live_le::timestamp at time zone 'Europe/Paris') >= $1::timestamptz
+   and l.live_le <= ($2::timestamptz at time zone 'Europe/Paris')::date
+ order by l.live_le desc, l.slug
+ limit 100`
+
+/**
+ * Le type d'une lecon (live_type), dit comme les lives du programme de la
+ * semaine (« Live trading », « Live formation ») ; les autres comme la page
+ * Rediffusion des Lives. Un type inconnu : la premiere lettre en capitale.
+ */
+const TYPES_LECON: Record<string, string> = {
+  'live-trading': 'Live trading',
+  formation: 'Live formation',
+  biais: 'Biais de la semaine',
+  recap: 'Récap',
+  tutoriel: 'Tutoriel',
+  faq: 'Live FAQ',
+  fonda: 'Fonda Talk',
+  'table-ronde': 'Table ronde',
+  masterclass: 'Masterclass',
+}
+
+export function typeDeLecon(t: string | null | undefined): string | null {
+  if (typeof t !== 'string' || !/^[a-z0-9-]{1,40}$/.test(t)) return null
+  return TYPES_LECON[t] ?? `${t.charAt(0).toUpperCase()}${t.slice(1).replace(/-/g, ' ')}`
+}
+
+/**
+ * Les intervenants d'une lecon dits comme la page les montre pour les lives a
+ * venir (lives-programme.ts, intervenantsDe puis animateurDe) : « Melanie »
+ * devient « Mel », l'ordre est Brice, Mel, Adrien, puis les autres noms tels
+ * quels. « Mel et Adrien ». null sans nom.
+ */
+const NOMS_COURTS: readonly (readonly [RegExp, string])[] = [
+  [/^brice$/, 'Brice'],
+  [/^(mel|melanie|melmom)$/, 'Mel'],
+  [/^(adrien|adri|yesindeed)$/, 'Adrien'],
+]
+const ORDRE_NOMS = ['Brice', 'Mel', 'Adrien']
+
+export function animateurDesIntervenants(noms: readonly unknown[] | null | undefined): string | null {
+  const vus: string[] = []
+  for (const brut of noms ?? []) {
+    const n = texteLigne(brut, 40)
+    if (n === null || n === 'trop_long') continue
+    const cle = n.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+    const court = NOMS_COURTS.find(([re]) => re.test(cle))?.[1] ?? n
+    if (!vus.includes(court)) vus.push(court)
+  }
+  const rang = (x: string) => { const i = ORDRE_NOMS.indexOf(x); return i < 0 ? ORDRE_NOMS.length : i }
+  vus.sort((a, b) => rang(a) - rang(b))
+  if (!vus.length) return null
+  return vus.length === 1 ? vus[0] : `${vus.slice(0, -1).join(', ')} et ${vus[vus.length - 1]}`
+}
+
+/**
+ * Le titre d'une lecon pour la carte : sans le repere entre crochets de la fin
+ * (« [Live Club 12/11/2026] », la carte dit deja le jour et le type), comme la
+ * page Rediffusion des Lives ; coupe a un mot pres au-dela de 120 caracteres.
+ */
+export function titreDeLecon(v: unknown): string | null {
+  const t = texteLigne(v, 400)
+  if (t === null || t === 'trop_long') return null
+  const m = t.match(/^(.*?)\s*\[([^\]]+)\]\s*$/)
+  const sans = (m && m[1].trim()) || t
+  const car = [...sans]
+  if (car.length <= LIMITES.titre) return sans
+  const coupe = car.slice(0, LIMITES.titre - 3).join('')
+  const espace = coupe.lastIndexOf(' ')
+  return `${(espace > 60 ? coupe.slice(0, espace) : coupe).replace(/[\s,;:.-]+$/, '')}...`
+}
+
+/**
+ * Les lecons de Rediffusion des Lives montrees comme lives passes (etat
+ * 'fini'). Gardes, en plus de la requete : lecon publiee du module, jour du
+ * live dans les 4 dernieres semaines et pas apres maintenant, une seule fois
+ * chacune, et JAMAIS une lecon deja posee comme replay d'un live du calendrier
+ * que la page montre (fini, pas annule) : elle est deja sur la carte de ce live.
+ *
+ * Le replay est le chemin de la lecon, envoye a tous (la lecon garde son propre
+ * acces, comme replayPourMembre). Une lecon n'a pas d'heure : horaire_a_definir
+ * vaut true (la page ne montre que le jour), debut = fin = minuit de Paris du
+ * jour du live, duree 0. Les champs sont ceux de vueMembre, rien de plus.
+ */
+export function livesDesLecons(
+  lecons: readonly LeconPassee[],
+  lignes: readonly Pick<LigneLive, 'replay' | 'statut' | 'debut' | 'duree_min' | 'horaire_a_definir'>[],
+  maintenant: number,
+): LiveMembre[] {
+  const { du } = fenetreMembre(maintenant)
+  const surUneCarte = new Set<string>()
+  for (const l of lignes) {
+    const r = lireReplay(l.replay)
+    if (r && l.statut !== 'annule' && finDuLive(l) <= maintenant) surUneCarte.add(r)
+  }
+  const out: LiveMembre[] = []
+  for (const x of lecons) {
+    if (x.statut !== 'publie' || x.module !== MODULE_REDIFFUSION) continue
+    const chemin = lireReplay(`/academie/${x.module}/${x.slug}`)
+    if (!chemin || surUneCarte.has(chemin)) continue
+    const debut = iso(x.debut)
+    if (!debut) continue
+    const t = Date.parse(debut)
+    if (t < du.getTime() || t > maintenant) continue
+    const titre = titreDeLecon(x.titre)
+    if (!titre) continue
+    surUneCarte.add(chemin)
+    out.push({
+      cle: `r:${x.slug}`,
+      titre,
+      animateur: animateurDesIntervenants(x.intervenants),
+      genre: 'aok',
+      description: null,
+      debut,
+      fin: debut,
+      duree_min: 0,
+      statut: 'prevu',
+      deplace_de: null,
+      // Pas montre pour un live passe : la lecon garde son propre acces.
+      acces: 'live_club',
+      etat: 'fini',
+      ouvre_le: debut,
+      lien: null,
+      type_live: typeDeLecon(x.type),
+      a_confirmer: false,
+      horaire_a_definir: true,
+      replay: chemin,
+      replay_reserve: false,
+    })
+  }
+  return out
 }
 
 export function fenetreCockpit(maintenant: number): { du: Date; au: Date } {

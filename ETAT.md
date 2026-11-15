@@ -1,5 +1,22 @@
 # ETAT du journal d etudes
 
+## LIVES PASSES SIMPLES : LES LECONS DE REDIFFUSION DES LIVES EN BAS DE /academie/lives (15/11/2026, demande de Brice, commite NON pousse, branche academie-lives-passes depuis origin/master 03bf67c ; AUCUNE migration)
+
+- Brief : D:\7_Agents\briefs\2026-11-15-academie-lives-passes-simples.md ; rapport : D:\7_Agents\briefs\academie-lives-passes-rapport.md.
+  Site : branche academie-lives-passes du workspace (cartes simples, bandeau retire).
+- POST /api/academie/lives rend aussi les lecons PUBLIEES (module publie) de rediffusion-des-lives dont le jour du live
+  (live_le, minuit de Paris) tombe dans les 4 dernieres semaines et pas apres aujourd'hui (SQL_LECONS_PASSEES, lecture
+  seule, role postgres, limit 100). livesDesLecons (lives.ts, pur) : une carte LiveMembre par lecon (cle r:<slug>,
+  etat fini, horaire_a_definir = true car pas d'heure, debut = fin = minuit de Paris, duree 0, replay = chemin de la
+  lecon envoye a tous : la lecon garde son acces), titre sans le repere entre crochets (comme la page Rediffusion),
+  type dit comme le programme (formation = « Live formation »), noms comme les lives a venir (Melanie = Mel, ordre
+  Brice, Mel, Adrien ; meme correspondance que intervenantsDe et animateurDe, verifie). Une lecon deja posee comme
+  replay d'un live du calendrier montre (fini, pas annule) n'est pas rendue une seconde fois. Une lecture des lecons
+  impossible ne fait pas tomber la route (log, liste du calendrier seule). Les biais de la semaine sont rendus.
+- Cas reel lu le 15/11 (lecture seule) : 0 live au calendrier, 16 lecons rendues, les 2 brouillons (10/11, 13/11) ecartes.
+- Verifs : verifier-lives.mjs 30 blocs (5 nouveaux), tsc, eslint, next build. Cockpit inchange (/api/cockpit/lives pas touche).
+- Mise en ligne : push du site d'abord (il lit les deux formes de reponse), puis push du journal.
+
 ## REPRISE DE LA PROGRESSION DES MEMBRES DE SKOOL : « DEJA VU AVANT » ET IMPORT DU RELEVE (15/11/2026, carte 382, commite NON pousse, branche academie-reprise-progression rebasee sur origin/master aa20d19 (lives en production) ; migration 20261115180000 du workspace ECRITE NON appliquee)
 
 - Briefs : D:\7_Agents\briefs\2026-11-15-academie-reprise-progression-skool.md et ...-codeur.md (mise a jour du 15/11

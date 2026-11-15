@@ -3,8 +3,8 @@ import { prisma } from '@/lib/db'
 import { compteDuJeton, corsAcademie, entetesAcademie, tronquer } from '@/lib/academie/http'
 import { droitsAcademie } from '@/lib/academie/droits'
 import {
-  SQL_ENTRE, fenetreMembre, lecteurDe, lireDemandeMembre, migrationAbsente, vueMembre,
-  type Lecteur, type LigneLive, type LiveMembre,
+  SQL_ENTRE, SQL_LECONS_PASSEES, fenetreMembre, lecteurDe, lireDemandeMembre, livesDesLecons, migrationAbsente, vueMembre,
+  type LeconPassee, type Lecteur, type LigneLive, type LiveMembre,
 } from '@/lib/academie/lives'
 
 /**
@@ -24,6 +24,13 @@ import {
  * garde son acces), un lien YouTube seulement a un compte qui a droit au live
  * (replayPourMembre). Les lives du programme de la semaine portent type_live,
  * a_confirmer et horaire_a_definir.
+ *
+ * (15/11/2026, brief 2026-11-15-academie-lives-passes-simples) Les lives passes
+ * viennent aussi des lecons PUBLIEES de Rediffusion des Lives dont le jour du
+ * live tombe dans les 4 dernieres semaines (livesDesLecons) : une carte chacune,
+ * « Voir le replay » vers la lecon (qui garde son acces). Une lecon deja posee
+ * comme replay d'un live du calendrier ne revient pas une seconde fois. Une
+ * lecture de ces lecons impossible ne fait pas tomber le calendrier.
  *
  * 200 { ok: true, lives: LiveMembre[], maintenant, connecte, live_club } ;
  * 400 action ; 401 jeton present mais refuse ; 503 base (code 'migration' si
@@ -80,9 +87,17 @@ export async function POST(req: NextRequest) {
       lecteur = lecteurDe(droits, acces[0]?.statut ?? null)
     }
     const lignes = await lignesP
+    // Les lecons de Rediffusion des Lives (lives passes) : une source de plus, jamais bloquante.
+    const lecons = await prisma.$queryRawUnsafe<LeconPassee[]>(SQL_LECONS_PASSEES, du, new Date(maintenant))
+      .catch((err: unknown) => {
+        console.warn(`[academie/lives] lecons de Rediffusion des Lives illisibles : ${err instanceof Error ? err.message.split('\n')[0].slice(0, 160) : 'erreur'}`)
+        return [] as LeconPassee[]
+      })
     const lives = lignes.map(l => vueMembre(l, lecteur, maintenant)).filter((l): l is LiveMembre => l !== null)
+    const replays = livesDesLecons(lecons, lignes, maintenant)
+    lives.push(...replays)
     const prets = lives.filter(l => l.etat === 'pret').length
-    console.info(`[academie/lives] ${userId ? tronquer(userId) : 'visiteur'} : ${lives.length} live(s), ${prets} lien(s) rendu(s)`)
+    console.info(`[academie/lives] ${userId ? tronquer(userId) : 'visiteur'} : ${lives.length} live(s) dont ${replays.length} de Rediffusion des Lives, ${prets} lien(s) rendu(s)`)
     return NextResponse.json({
       ok: true,
       lives,

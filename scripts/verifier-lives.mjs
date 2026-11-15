@@ -613,4 +613,118 @@ bloc('la tache : lecture seule de Telegram, aucune ecriture en simulation, aucun
   }
 })
 
+// ===========================================================================
+// (15/11/2026, brief 2026-11-15-academie-lives-passes-simples) LES LIVES PASSES
+// VENUS DE REDIFFUSION DES LIVES : une carte par lecon publiee des 4 dernieres
+// semaines, « Voir le replay », jamais deux fois la meme lecon.
+// ===========================================================================
+
+const T_PASSES = Date.parse('2026-11-15T11:00:00Z')
+// Minuit de Paris du jour du live : ce que la base rend dans « debut ».
+const minuitParis = jour => new Date(Date.parse(PG.parisVersIso(jour, '00:00')))
+const LP = (slug, jour, o = {}) => ({
+  slug, module: 'rediffusion-des-lives', titre: `Un live du ${jour} [Live Club ${jour}]`, statut: 'publie', live_le: jour,
+  debut: minuitParis(jour), type: 'live-trading', intervenants: ['Mélanie'], ...o,
+})
+const CHAMPS_MEMBRE = 'a_confirmer,acces,animateur,cle,debut,deplace_de,description,duree_min,etat,fin,genre,horaire_a_definir,lien,ouvre_le,replay,replay_reserve,statut,titre,type_live'
+
+bloc('lives passes de Rediffusion : une carte par lecon, les champs de la page, le replay a tous', () => {
+  const [v] = L.livesDesLecons([LP('live-club-12-11-2026', '2026-11-12', {
+    titre: 'Replay du Live de ce matin, HRLR slow market [Live Club 12/11/2026]', intervenants: ['Adrien'],
+  })], [], T_PASSES)
+  assert.equal(Object.keys(v).sort().join(','), CHAMPS_MEMBRE, 'les memes champs que vueMembre, rien de plus')
+  assert.equal(v.cle, 'r:live-club-12-11-2026')
+  assert.equal(v.titre, 'Replay du Live de ce matin, HRLR slow market', 'le repere entre crochets part : la carte dit le jour et le type')
+  assert.equal(v.animateur, 'Adrien')
+  assert.equal(v.type_live, 'Live trading')
+  assert.equal(v.replay, '/academie/rediffusion-des-lives/live-club-12-11-2026')
+  assert.equal(v.replay_reserve, false, 'la lecon part a tous : elle garde son propre acces')
+  assert.deepEqual([v.etat, v.lien, v.statut, v.horaire_a_definir], ['fini', null, 'prevu', true])
+  assert.equal(v.debut, '2026-11-11T23:00:00.000Z', 'minuit de Paris du jour du live')
+  assert.ok(Date.parse(v.fin) <= T_PASSES, 'deja fini : jamais dans les lives a venir')
+  // Les noms comme pour les lives a venir : Melanie devient Mel, ordre Brice, Mel, Adrien.
+  assert.equal(L.animateurDesIntervenants(['Mélanie']), 'Mel')
+  assert.equal(L.animateurDesIntervenants(['Adrien', 'Mélanie']), 'Mel et Adrien')
+  assert.equal(L.animateurDesIntervenants(['Mélanie', 'Brice', 'Adrien']), 'Brice, Mel et Adrien')
+  assert.equal(L.animateurDesIntervenants(['Arnaud', 'Mélanie']), 'Mel et Arnaud', 'un autre nom reste tel quel, apres')
+  assert.equal(L.animateurDesIntervenants(['MELANIE', 'Mel']), 'Mel', 'une fois')
+  assert.equal(L.animateurDesIntervenants([]), null)
+  assert.equal(L.animateurDesIntervenants(null), null)
+  for (const noms of [['Mélanie'], ['Adrien'], ['Brice'], ['Mélanie', 'Adrien'], ['Adrien', 'Brice', 'Mélanie']]) {
+    assert.equal(L.animateurDesIntervenants(noms), PG.animateurDe(PG.intervenantsDe(noms)), `meme correspondance que la tache : ${noms}`)
+  }
+  // Les types dits comme le programme ; un type inconnu lisible, un type bizarre ignore.
+  assert.deepEqual(['live-trading', 'formation', 'recap', 'biais', 'table-ronde', 'nouveau-type', null, 'X;drop'].map(L.typeDeLecon),
+    ['Live trading', 'Live formation', 'Récap', 'Biais de la semaine', 'Table ronde', 'Nouveau type', null, null])
+  // Le titre : sans crochets, coupe a un mot pres, jamais vide.
+  assert.equal(L.titreDeLecon('[Live Club 12/11/2026]'), '[Live Club 12/11/2026]')
+  const long = L.titreDeLecon(`${'mot '.repeat(60)}[Live Club 12/11/2026]`)
+  assert.ok([...long].length <= 120 && long.endsWith('...') && !long.includes('['), long)
+  assert.equal(L.titreDeLecon(`  Un${c(0x200b)} titre  `), 'Un titre')
+  assert.equal(L.titreDeLecon(''), null)
+})
+
+bloc('lives passes de Rediffusion : un brouillon ne s affiche jamais', () => {
+  const lecons = [
+    LP('live-club-13-11-2026', '2026-11-13', { statut: 'brouillon' }),
+    LP('live-club-10-11-2026', '2026-11-10', { statut: 'brouillon' }),
+    LP('live-club-12-11-2026', '2026-11-12'),
+    LP('live-club-11-11-2026', '2026-11-11', { statut: 'archive' }),
+  ]
+  assert.deepEqual(L.livesDesLecons(lecons, [], T_PASSES).map(v => v.cle), ['r:live-club-12-11-2026'])
+  // La requete ne lit que les lecons publiees d'un module publie.
+  assert.match(L.SQL_LECONS_PASSEES, /m\.statut = 'publie' and l\.statut = 'publie'/)
+  assert.match(L.SQL_LECONS_PASSEES, /where m\.slug = 'rediffusion-des-lives'/)
+  // Une lecon d'un autre module, meme publiee : jamais.
+  assert.equal(L.livesDesLecons([LP('x', '2026-11-12', { module: 'formation-complete' })], [], T_PASSES).length, 0)
+})
+
+bloc("lives passes de Rediffusion : une lecon deja posee comme replay d'un live n'apparait qu'une fois", () => {
+  const live = {
+    ...LIGNE, serie_id: null, cle: 'p:mel-12', debut: new Date('2026-11-12T08:00:00Z'), debut_prevu: new Date('2026-11-12T08:00:00Z'),
+    replay: '/academie/rediffusion-des-lives/live-club-12-11-2026', horaire_a_definir: false,
+  }
+  const lecons = [LP('live-club-12-11-2026', '2026-11-12'), LP('live-club-11-11-2026', '2026-11-11')]
+  const lc = L.lecteurDe({ ...NON, liveClub: 'oui' }, 'live_club')
+  const page = [L.vueMembre(live, lc, T_PASSES), ...L.livesDesLecons(lecons, [live], T_PASSES)]
+  const chemins = page.map(v => v.replay)
+  assert.equal(chemins.filter(r => r === live.replay).length, 1, 'une seule carte pour cette lecon : celle du live')
+  assert.deepEqual(page.map(v => v.cle), ['p:mel-12', 'r:live-club-11-11-2026'])
+  // Le replay pose sous la forme de l'adresse complete : reconnu aussi.
+  const complet = { ...live, replay: 'https://aoknowledge.com/academie/rediffusion-des-lives/live-club-12-11-2026' }
+  assert.deepEqual(L.livesDesLecons(lecons, [complet], T_PASSES).map(v => v.cle), ['r:live-club-11-11-2026'])
+  // Un live ANNULE n'est pas montre : sa lecon revient seule (une fois).
+  assert.deepEqual(L.livesDesLecons(lecons, [{ ...live, statut: 'annule' }], T_PASSES).map(v => v.cle), ['r:live-club-12-11-2026', 'r:live-club-11-11-2026'])
+  // La meme lecon lue deux fois : une carte.
+  assert.equal(L.livesDesLecons([lecons[0], lecons[0]], [], T_PASSES).length, 1)
+})
+
+bloc('lives passes de Rediffusion : au-dela de 4 semaines, rien ; rien dans le futur', () => {
+  const du = L.fenetreMembre(T_PASSES).du.getTime()
+  assert.equal(new Date(du).toISOString(), '2026-10-18T11:00:00.000Z')
+  const lecons = [
+    LP('live-club-17-10-2026', '2026-10-17'),
+    LP('live-club-18-10-2026', '2026-10-18'), // minuit de Paris le 18/10 : avant le debut de la fenetre (11:00 UTC)
+    LP('live-club-19-10-2026', '2026-10-19'),
+    LP('live-club-15-11-2026', '2026-11-15'), // aujourd'hui : montree (le live est passe ou en cours de journee)
+    LP('live-club-16-11-2026', '2026-11-16'), // demain : jamais
+  ]
+  assert.deepEqual(L.livesDesLecons(lecons, [], T_PASSES).map(v => v.cle), ['r:live-club-19-10-2026', 'r:live-club-15-11-2026'])
+  // La meme borne dans la requete : minuit de Paris du jour du live >= debut de la fenetre, et pas apres aujourd'hui (Paris).
+  assert.match(L.SQL_LECONS_PASSEES, /\(l\.live_le::timestamp at time zone 'Europe\/Paris'\) >= \$1::timestamptz/)
+  assert.match(L.SQL_LECONS_PASSEES, /l\.live_le <= \(\$2::timestamptz at time zone 'Europe\/Paris'\)::date/)
+  assert.match(L.SQL_LECONS_PASSEES, /limit 100/)
+  assert.doesNotMatch(L.SQL_LECONS_PASSEES, /insert|update|delete/i)
+  // Une ligne sans jour lisible : ignoree.
+  assert.equal(L.livesDesLecons([LP('x', '2026-11-12', { debut: null })], [], T_PASSES).length, 0)
+})
+
+bloc('la route : les lecons lues dans la fenetre des lives, sans faire tomber le calendrier', () => {
+  const membre = lire('../src/app/api/academie/lives/route.ts')
+  assert.match(membre, /\$queryRawUnsafe<LeconPassee\[\]>\(SQL_LECONS_PASSEES, du, new Date\(maintenant\)\)/)
+  assert.match(membre, /\.catch\(\(err: unknown\) => \{/)
+  assert.match(membre, /livesDesLecons\(lecons, lignes, maintenant\)/)
+  assert.doesNotMatch(membre, /\$executeRaw|insert into|update public/i, 'la route ne fait que lire')
+})
+
 console.log(`\n${blocs} blocs ok`)
