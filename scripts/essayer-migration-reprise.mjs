@@ -162,7 +162,9 @@ try {
     assert.deepEqual(premier, { m: membres.length, c: releve.lignes.length })
     assert.deepEqual(second, { m: 0, c: 0 })
     assert.deepEqual(n, { m: membres.length, c: releve.lignes.length })
-    const rattaches = await tx.$queryRawUnsafe(R.SQL_RATTACHER_PAR_EMAIL)
+    // (15/11 soir) SQL_RATTACHER_PAR_EMAIL est remplace par le rattachement automatique (essayer-migration-reprise-auto.mjs).
+    const fictifs = new Set(membres.map(x => x.skoolMemberId))
+    const rattaches = R.lirePaires(await tx.$queryRawUnsafe(R.SQL_PAIRES_RATTACHEMENT)).filter(p => fictifs.has(p.membre) && p.mode === 'email')
     assert.equal(rattaches.length, 0, 'aucune adresse fictive ne correspond a un compte')
     const adresses = await tx.$queryRawUnsafe(R.SQL_ADRESSES_RATTACHABLES, membres.map(x => x.email).filter(Boolean))
     assert.equal(adresses.length, 0)

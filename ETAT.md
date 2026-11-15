@@ -1,5 +1,48 @@
 # ETAT du journal d etudes
 
+## L'AVANCEE DE SKOOL PRE-REMPLIE TOUTE SEULE : RATTACHEMENT AUTOMATIQUE (EMAIL PUIS NOM, EN RECOUPANT LE COCKPIT) ET PRE-REMPLISSAGE A LA CONNEXION (15/11/2026 soir, go de Brice, commite NON pousse, branche academie-reprise-auto depuis origin/master e041f62 ; migration 20261115200000 du workspace ECRITE NON appliquee)
+
+- Brief : D:\7_Agents\briefs\2026-11-15-academie-reprise-auto.md (section 1 bis : « recouper avec tout ce que le Cockpit
+  sait », prioritaire). Rapport : D:\7_Agents\briefs\academie-reprise-auto-rapport.md. Site : branche academie-reprise-auto
+  du workspace (encart « N lecons cochees depuis Skool »).
+- RATTACHEMENT (reprise-pur.ts, CTE_PAIRES + deciderRattachements, la MEME regle pour /moi, rattraper-reprise-skool.mjs et
+  importer-progression-skool.mjs ; SQL_RATTACHER_PAR_EMAIL n'existe plus). Emails d'un compte : connexion verifiee,
+  profile_emails VERIFIES, invitation (academie_invitations.user_id), academie_acces poses sur le compte, puis la fiche du
+  cockpit trouvee par l'un d'eux dans cockpit_membre_emails : tous ses emails et les payeur_email de cockpit_paiements.
+  Noms : profil (first_name, last_name) et fiche (cockpit_membres), normalises (minuscules, sans accents, espaces reduits,
+  meme table en JS et en SQL : normaliserNom / sqlNomNormalise). Regle : l'email d'abord, sinon le nom (prenom ET nom,
+  porte par UN SEUL membre de Skool) ; sans ambiguite dans les deux sens (le compte ne retrouve qu'un membre, le membre
+  ne retrouve que ce compte, meme priorite) ; jamais un membre deja rattache ni un compte deja rattache (garde aussi en
+  base : SQL_RATTACHER_AUTO) ; un email du compte ou du membre dans cockpit_oublis_emails = rien. rattache_source garde
+  d'ou vient le lien (jamais un email ni un nom). Un nouvel import rompt un rattachement par nom si le nom change.
+- PRE-REMPLISSAGE (planRemplissage, ecrireRemplissage) : chaque cours de Skool a module ET sure (COURS_SKOOL_REMPLIS ;
+  Chronique et Rediffusion des Lives exclus), dernier releve, terminees > 0 ; fini = toutes les lecons PUBLIEES de la
+  cible (module, ou la partie), partiel = les premieres dans l'ordre de l'academie (sans partie, puis parties, puis
+  lecons), round(terminees / total x N), au moins 1. Aucun filtre sur les droits (le brief dit « les lecons publiees »).
+  Ecrit, dans une transaction (lock 3 s, 8 s) : la ligne academie_reprises en mode auto (par vide, MEME verrou que le
+  bouton, on conflict sur l'index membre ET auto) d'abord, puis les lecons MANQUANTES seulement (on conflict do nothing :
+  une lecon vue, ouverte ou decochee n'est jamais touchee ; vu_le, vu_par 'reprise', nb_sessions 0, ni terminee_le ni
+  marquee_vue_le), puis la liste. Une ligne auto est posee meme si toutes les lecons visees existaient deja (le cours
+  est traite, le bouton disparait). Pas de fenetre de 30 jours. Rejouable.
+- /moi : avant la progression, repriseAutomatique (une lecture SQL_ETAT_AUTO ; pour un compte pas rattache, les couples
+  qui touchent ses membres via SQL_PAIRES_RATTACHEMENT_COMPTE, vide et leger s'il ne retrouve personne). Une panne : log
+  (compte tronque, mode, nombres), /moi continue. reprise.faites rend les modes membre ET auto, avec mode et lecons ;
+  dejaFaite compte auto (le bouton refuse 'deja').
+- Scripts : rattraper-reprise-skool.mjs [--ecrire] (a blanc par defaut ; une transaction : liens automatiques, filet a la
+  main RATTACHEMENTS_A_LA_MAIN (1 membre, mode equipe, auteur Brice, seulement si l'automatique ne l'a pas fait), puis
+  pre-remplissage de TOUS les comptes rattaches ; sortie : des nombres). A blanc le 15/11 soir sur la vraie base : 98
+  comptes, 38 deja rattaches, 8 se rattachent (email 3 : connexion 1, fiche 2 ; nom 5 : profil), dont 5 avec historique,
+  1 refus (un nom de profil = un membre deja rattache a un autre compte), le rattachement a la main deja retrouve par l'automatique ; 34 comptes a
+  remplir, 92 cours ou parties, 1 614 lecons cochees (1 677 visees, 63 deja la).
+- Verifs : verifier-reprise-auto.mjs (18 blocs, hors ligne), verifier-reprise (17), verifier-lives (30), verifier-academie
+  --hors-ligne (54), verifier-effacement (21, copie qui pointe vers le worktree), essayer-migration-reprise-auto.mjs
+  (13 etapes contre la vraie base, transaction ANNULEE : vraies donnees + cas fabriques sur membres de Skool fictifs ;
+  le bouton du journal d'avant bute bien sur le nouvel index), tsc, eslint, next build.
+- MISE EN LIGNE, dans l'ordre : (1) essai puis migration 20261115200000 ; (2) push du journal ; (3)
+  rattraper-reprise-skool.mjs a blanc puis --ecrire ; (4) push du site. Cockpit : rien.
+- essayer-migration-reprise.mjs (20261115180000) : ne passe plus contre la vraie base depuis l'import du 15/11 (il compte
+  les tables comme vides) ; seule sa ligne SQL_RATTACHER_PAR_EMAIL a ete remplacee.
+
 ## LIVES PASSES SIMPLES : LES LECONS DE REDIFFUSION DES LIVES EN BAS DE /academie/lives (15/11/2026, demande de Brice, commite NON pousse, branche academie-lives-passes depuis origin/master 03bf67c ; AUCUNE migration)
 
 - Brief : D:\7_Agents\briefs\2026-11-15-academie-lives-passes-simples.md ; rapport : D:\7_Agents\briefs\academie-lives-passes-rapport.md.

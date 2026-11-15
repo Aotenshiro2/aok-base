@@ -274,10 +274,11 @@ bloc('la lecture du releve : BOM, separateur ;, guillemets, cours vides, lignes 
   assert.equal(R.rattachableParEmail(m.get('e'.repeat(32))), false)
   // Colonnes manquantes : le fichier entier est refuse.
   assert.equal(R.lireReleveSkool('a;b\n1;2').erreurs[0].motif, 'colonnes')
-  // Le rattachement automatique ne prend jamais une adresse ambigue, ni aucune, ni un nom.
-  assert.match(R.SQL_RATTACHER_PAR_EMAIL, /m\.email_source not in \('aucune', 'ambigu-plusieurs-homonymes'\)/)
-  assert.match(R.SQL_RATTACHER_PAR_EMAIL, /having count\(distinct c\.id\) = 1/)
-  assert.ok(!/\bnom\b|prenom/.test(R.SQL_RATTACHER_PAR_EMAIL.replace(/--.*$/gm, '')))
+  // Le rattachement automatique ne prend jamais une adresse ambigue, ni aucune. (15/11 soir, go de Brice : le nom est
+  // permis, sans ambiguite dans les deux sens ; un compte et un membre une seule fois : verifier-reprise-auto.mjs.)
+  assert.match(R.SQL_PAIRES_RATTACHEMENT, /k\.email_source not in \('aucune', 'ambigu-plusieurs-homonymes'\)/)
+  assert.match(R.SQL_RATTACHER_AUTO, /and m\.profile_id is null/)
+  assert.match(R.SQL_RATTACHER_AUTO, /not exists \(select 1 from public\.academie_skool_membres x where x\.profile_id = \$1::uuid\)/)
 })
 
 bloc('l import sans doublon : cles uniques et on conflict, un rattachement a la main survit a un nouvel import', () => {

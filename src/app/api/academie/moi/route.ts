@@ -5,7 +5,9 @@ import { lireCatalogue, type Catalogue } from '@/lib/academie/catalogue'
 import { construire } from '@/lib/academie/vue-moi'
 import { compteDuJeton, corsAcademie, entetesAcademie, origineDeLaRequete, refusAcademie, tronquer } from '@/lib/academie/http'
 import { etatQuestions, vueQuestions, type EtatQuestions } from '@/lib/academie/questions-entree'
-import { reperePublic, reperesDuCompte, situationReprise, vueReprise, type SituationReprise } from '@/lib/academie/reprise'
+import {
+  repriseAutomatique, reperePublic, reperesDuCompte, situationReprise, vueReprise, type BilanAuto, type SituationReprise,
+} from '@/lib/academie/reprise'
 import { noterConnexion, progressionDuCompte, type ProgressionLecon } from '@/lib/academie/suivi'
 import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
 import { soutienDuCompte, type SoutienDuCompte } from '@/lib/soutien'
@@ -40,10 +42,17 @@ import { soutienDuCompte, type SoutienDuCompte } from '@/lib/soutien'
  *     questions_entree: { poser, version, questions: [texte, texte] },   les questions d'entree (30/10/2026,
  *                           questions-entree.ts) : poser = compte non admin qui n'a ni repondu ni passe
  *                           (faux si la table est absente ou illisible : /moi ne tombe jamais pour elles)
- *     reprise: { possible, historique, jusquau, une_fois_par, faites: [{ module_id, section_id }] } | null,
+ *     reprise: { possible, historique, jusquau, une_fois_par, faites: [{ module_id, section_id, mode, lecons }] } | null,
  *                           le bouton « Deja vu avant » (15/11/2026, reprise.ts) : possible = historique (releve de
  *                           Skool ou ancien membre) ET dans la fenetre ; faites = reprises du membre (le « une fois ») ;
- *                           null = illisible ou migration 20261115180000 absente (pas de bouton, /moi ne tombe pas)
+ *                           null = illisible ou migration 20261115180000 absente (pas de bouton, /moi ne tombe pas).
+ *                           (15/11 soir) mode : membre (le bouton) ou auto (pre-rempli depuis Skool) ; lecons = le
+ *                           nombre de lecons cochees ce jour-la
+ *
+ * (15/11/2026 soir, brief 2026-11-15-academie-reprise-auto) Avant de lire la progression, /moi RATTACHE le compte a son
+ * membre de Skool s'il ne l'est pas (email, puis nom, en recoupant le site et la fiche du cockpit, sans ambiguite) et
+ * PRE-REMPLIT les cours de Skool pas encore remplis (reprise.ts, repriseAutomatique, une transaction). Une panne ne
+ * fait jamais tomber /moi : un log (le compte tronque et des nombres), et la page sans pre-remplissage.
  *     modules: [{ id, slug, titre, resume, parcours, ordre, statut, auteur, image,
  *                 prix_eur,                 prix du module vendu seul, null = pas vendu seul
  *                 lien_externe,             https vers un autre site (Masterclass) ou null ; rempli =
@@ -115,9 +124,26 @@ export async function GET(req: NextRequest) {
     return 'indisponible' as const
   })
 
+  // (15/11/2026 soir) Le rattachement a Skool et le pre-remplissage, AVANT la lecture de la progression et du
+  // bouton. Une panne (base, migration 20261115200000 absente) ne fait jamais tomber /moi : un log, et on continue.
+  const lectureCatalogue = lireCatalogue()
+  const auto: Promise<BilanAuto | null> = lectureCatalogue.then(
+    cat => repriseAutomatique(userId, cat).then(b => {
+      if (b.rattache || b.lecons > 0) {
+        console.info(`[academie/moi] reprise auto compte=${tronquer(userId)} rattache=${b.rattache?.mode ?? 'non'}`
+          + `${b.rattache ? `/${b.rattache.source}` : ''} cours=${b.cours} lecons=${b.lecons}`)
+      }
+      return b
+    }),
+    () => null,
+  ).catch((err: unknown) => {
+    console.warn(`[academie/moi] reprise auto en echec compte=${tronquer(userId)} : ${messageErreur(err)}`)
+    return null
+  })
+
   // (15/11/2026) Le bouton « Deja vu avant » et les reperes de Skool : une panne ou la migration absente ne fait
   // jamais tomber /moi (pas de bouton).
-  const reprise: Promise<SituationReprise | null> = situationReprise(userId).catch((err: unknown) => {
+  const reprise: Promise<SituationReprise | null> = auto.then(() => situationReprise(userId)).catch((err: unknown) => {
     if (!relationAbsente(err)) console.warn(`[academie/moi] reprise illisible compte=${tronquer(userId)} : ${messageErreur(err)}`)
     return null
   })
@@ -128,8 +154,8 @@ export async function GET(req: NextRequest) {
   try {
     [droits, catalogue, progression] = await Promise.all([
       droitsAcademie(userId),
-      lireCatalogue(),
-      progressionDuCompte(userId),
+      lectureCatalogue,
+      auto.then(() => progressionDuCompte(userId)),
     ])
   } catch (err) {
     console.warn(`[academie/moi] lecture impossible compte=${tronquer(userId)} : ${

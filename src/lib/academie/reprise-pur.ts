@@ -8,6 +8,12 @@
 // et ...-codeur.md (mise a jour du 15/11 apres-midi : le releve). Migration :
 // sites/Aoknowledgecom/supabase/migrations/20261115180000_academie_reprise_progression.sql.
 //
+// (15/11/2026 soir, brief 2026-11-15-academie-reprise-auto, go de Brice) Le
+// RATTACHEMENT AUTOMATIQUE (par email ou par nom, en recoupant tout ce que le
+// site et le cockpit savent de la personne, sans ambiguite) et le
+// PRE-REMPLISSAGE de l'avancee de Skool (mode 'auto' du journal des reprises),
+// en fin de fichier. Migration : 20261115200000_academie_reprise_auto.sql.
+//
 // PUR : aucun import a l'execution sauf node:crypto (les types de pur.ts
 // s'effacent) : scripts/verifier-reprise.mjs l'importe avec Node seul.
 // Jamais un email ni un nom dans ce qui sort d'ici vers un log : des comptes,
@@ -117,17 +123,30 @@ export function etatReprise(f: FaitsReprise, o: { jours?: number; depuis?: strin
 // Une fois par cours
 // ---------------------------------------------------------------------------
 
-/** La cle du « une fois » ecrite dans academie_reprises.verrou (mode membre). */
+/**
+ * La cle du « une fois » ecrite dans academie_reprises.verrou (mode membre, et
+ * mode auto : le pre-remplissage pose le MEME verrou que le bouton, l'index
+ * unique couvre les deux modes depuis 20261115200000).
+ */
 export function verrouReprise(regle: RegleUneFois, moduleId: string, sectionId: string | null): string {
   if (regle === 'cible' && sectionId) return `section:${sectionId}`
   return `module:${moduleId}`
 }
 
-export type RepriseFaite = { moduleId: string; sectionId: string | null; mode: 'membre' | 'equipe' }
+/** membre = le bouton ; auto = le pre-remplissage depuis Skool (15/11 soir) ; equipe = un geste de l'equipe. */
+export type ModeReprise = 'membre' | 'equipe' | 'auto'
+/** Les modes qui consomment le « une fois » (et cachent le bouton). */
+export const MODES_UNE_FOIS: readonly ModeReprise[] = ['membre', 'auto']
 
-/** Le compte a-t-il deja utilise son « Deja vu avant » pour cette cible ? Les gestes de l'equipe ne comptent pas. */
+export type RepriseFaite = { moduleId: string; sectionId: string | null; mode: ModeReprise; lecons?: number }
+
+/**
+ * Le compte a-t-il deja utilise son « Deja vu avant » pour cette cible, ou le
+ * cours a-t-il ete pre-rempli depuis Skool (mode auto) ? Les gestes de
+ * l'equipe ne comptent pas.
+ */
 export function dejaFaite(regle: RegleUneFois, faites: readonly RepriseFaite[], moduleId: string, sectionId: string | null): boolean {
-  const miennes = faites.filter(f => f.mode === 'membre' && f.moduleId === moduleId)
+  const miennes = faites.filter(f => MODES_UNE_FOIS.includes(f.mode) && f.moduleId === moduleId)
   if (regle === 'cours') return miennes.length > 0
   return miennes.some(f => f.sectionId === null || (sectionId !== null && f.sectionId === sectionId))
 }
@@ -642,9 +661,12 @@ select ps.skool_cours_id, ps.skool_cours_titre, ps.lecons_terminees, ps.lecons_t
  where ps.skool_member_id in (select skool_member_id from membres)
 `
 
-/** $1 = compte. Ses reprises (les deux modes : seul le mode membre compte pour le « une fois »). */
+/**
+ * $1 = compte. Ses reprises (tous les modes : membre et auto comptent pour le
+ * « une fois », equipe non), avec le nombre de lecons cochees.
+ */
 export const SQL_REPRISES_DU_COMPTE = `
-select r.module_id::text as module_id, r.section_id::text as section_id, r.mode
+select r.module_id::text as module_id, r.section_id::text as section_id, r.mode, cardinality(r.lecons)::int as lecons
   from public.academie_reprises r
  where r.user_id = $1::uuid
 `
@@ -699,11 +721,18 @@ update public.academie_reprises set lecons = $2::uuid[] where id = $1::uuid
  * Les membres de Skool : $1 ids, $2 prenoms, $3 noms, $4 emails, $5 sources,
  * $6 statuts, $7 dates d'entree (texte AAAA-MM-JJ ou null), $8 date du
  * releve. Rejouable : une ligne inchangee n'est pas reecrite. Un rattachement
- * PAR EMAIL tombe si l'adresse change ou devient ambigue ; un rattachement a
- * la main (equipe, membre) reste. Rend { cree } par ligne ecrite.
+ * PAR EMAIL tombe si l'adresse change ou devient ambigue, un rattachement PAR
+ * NOM (20261115200000) si le prenom ou le nom change : le compte se rattache
+ * de nouveau a son prochain passage par /moi si c'est toujours sans
+ * ambiguite. Un rattachement a la main (equipe, membre) reste. Rend { cree }
+ * par ligne ecrite.
  * Une adresse effacee (cockpit_oublis_emails : effacement de niveau 3 par
  * cockpit_effacer) est sautee : l'import ne recree pas une personne effacee.
  */
+const RATTACHEMENT_ROMPU = `m.rattache_mode = 'email'
+                     and (excluded.email is distinct from m.email or excluded.email_source = 'ambigu-plusieurs-homonymes')
+                     or m.rattache_mode = 'nom' and (excluded.prenom, excluded.nom) is distinct from (m.prenom, m.nom)`
+
 export const SQL_IMPORTER_MEMBRES = `
 insert into public.academie_skool_membres as m
        (skool_member_id, prenom, nom, email, email_source, statut_skool, rejoint_skool, releve_le)
@@ -720,15 +749,10 @@ on conflict (skool_member_id) do update set
   statut_skool = excluded.statut_skool,
   rejoint_skool = excluded.rejoint_skool,
   releve_le = greatest(m.releve_le, excluded.releve_le),
-  profile_id = case when m.rattache_mode = 'email'
-                     and (excluded.email is distinct from m.email or excluded.email_source = 'ambigu-plusieurs-homonymes')
-                    then null else m.profile_id end,
-  rattache_le = case when m.rattache_mode = 'email'
-                      and (excluded.email is distinct from m.email or excluded.email_source = 'ambigu-plusieurs-homonymes')
-                     then null else m.rattache_le end,
-  rattache_mode = case when m.rattache_mode = 'email'
-                        and (excluded.email is distinct from m.email or excluded.email_source = 'ambigu-plusieurs-homonymes')
-                       then null else m.rattache_mode end,
+  profile_id = case when ${RATTACHEMENT_ROMPU} then null else m.profile_id end,
+  rattache_le = case when ${RATTACHEMENT_ROMPU} then null else m.rattache_le end,
+  rattache_source = case when ${RATTACHEMENT_ROMPU} then null else m.rattache_source end,
+  rattache_mode = case when ${RATTACHEMENT_ROMPU} then null else m.rattache_mode end,
   maj_le = now()
   where (m.prenom, m.nom, m.email, m.email_source, m.statut_skool, m.rejoint_skool)
         is distinct from (excluded.prenom, excluded.nom, excluded.email, excluded.email_source, excluded.statut_skool, excluded.rejoint_skool)
@@ -784,38 +808,616 @@ select c.e as email
 having count(distinct c.id) = 1
 `
 
+// ---------------------------------------------------------------------------
+// Le RATTACHEMENT AUTOMATIQUE (15/11/2026 soir, brief
+// 2026-11-15-academie-reprise-auto, points 1 et 1 bis, go de Brice)
+// ---------------------------------------------------------------------------
+//
+// Brice : « Ca sert a quoi d'avoir toutes les infos sur les membres dans le
+// cockpit si a chaque fois tu limites les recoupements de donnees a une
+// entree ? » Le rattachement rassemble donc TOUTES les identites connues de la
+// personne, puis compare avec celles du membre de Skool.
+//
+// Les emails d'un compte du site :
+//   connexion   l'email de connexion verifie (auth.users.email_confirmed_at) ;
+//   secondaire  les emails VERIFIES de profile_emails (un email non verifie ne
+//               sert pas : n'importe qui pourrait ajouter l'adresse d'un autre) ;
+//   invitation  l'email de l'invitation qui a cree le compte ;
+//   acces       les emails des acces de l'academie poses sur ce compte ;
+//   fiche       tous les emails de la fiche du cockpit de la personne, trouvee
+//               par n'importe lequel des emails ci-dessus (cockpit_membre_emails) ;
+//   paiement    les payeur_email des paiements de cette fiche.
+// Les noms d'un compte : prenom et nom du profil (profil), de la fiche (fiche).
+// Un membre de Skool : son email (hors 'aucune' et 'ambigu-plusieurs-homonymes'),
+// son prenom et son nom.
+//
+// La regle (deciderRattachements, ci-dessous, la meme pour /moi et les scripts) :
+//   - par l'email d'abord : un email du compte est celui du membre (mode email) ;
+//     sinon par le nom : un nom normalise du compte est exactement celui du
+//     membre (mode nom), prenom ET nom non vides, et ce nom n'appartient qu'a UN
+//     SEUL membre de Skool ;
+//   - SANS AMBIGUITE, dans les deux sens : le compte ne retrouve qu'un membre,
+//     et ce membre ne retrouve que ce compte (meme priorite : l'email, puis le nom) ;
+//   - jamais un membre deja rattache, jamais un compte deja rattache ;
+//   - une personne effacee ne revient pas : un email du compte ou du membre
+//     dans cockpit_oublis_emails, et rien ne se fait.
+// Le rattachement garde sa source (rattache_source), jamais un email ni un nom.
+
+export type ModeAuto = 'email' | 'nom'
+export const SOURCES_RATTACHEMENT_EMAIL = ['connexion', 'secondaire', 'invitation', 'acces', 'fiche', 'paiement'] as const
+export const SOURCES_RATTACHEMENT_NOM = ['profil', 'fiche'] as const
+export type SourceRattachement = (typeof SOURCES_RATTACHEMENT_EMAIL)[number] | (typeof SOURCES_RATTACHEMENT_NOM)[number]
+
+// La normalisation d'un nom : minuscules, sans accents, espaces reduits. La
+// MEME table sert au SQL (translate) et a normaliserNom (verifications).
+const LETTRES_ACCENTUEES: readonly (readonly [string, string])[] = [
+  ['àáâãäåāăą', 'a'], ['çćĉċč', 'c'], ['ďđ', 'd'], ['èéêëēĕėęě', 'e'], ['ĝğġģ', 'g'], ['ĥħ', 'h'],
+  ['ìíîïĩīĭįı', 'i'], ['ĵ', 'j'], ['ķ', 'k'], ['ĺļľŀł', 'l'], ['ñńņň', 'n'], ['òóôõöøōŏő', 'o'],
+  ['ŕŗř', 'r'], ['śŝşš', 's'], ['ţťŧ', 't'], ['ùúûüũūŭůűų', 'u'], ['ŵ', 'w'], ['ýÿŷ', 'y'], ['źżž', 'z'],
+]
+const AVEC = [...LETTRES_ACCENTUEES.map(([a]) => a).join(''), ' ']
+const SANS = [...LETTRES_ACCENTUEES.map(([a, b]) => b.repeat([...a].length)).join(''), ' ']
+if (AVEC.length !== SANS.length) throw new Error('table des accents incoherente')
+
+/** Un nom normalise (minuscules, sans accents, espaces reduits), ou null s'il est vide. */
+export function normaliserNom(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  let t = ''
+  for (const c of v.toLowerCase()) {
+    const i = AVEC.indexOf(c)
+    t += i >= 0 ? SANS[i] : c
+  }
+  t = t.replace(/œ/g, 'oe').replace(/æ/g, 'ae').replace(/ß/g, 'ss').replace(/\s+/g, ' ').trim()
+  return t || null
+}
+
+/** La meme normalisation en SQL (null si vide). */
+export function sqlNomNormalise(colonne: string): string {
+  return `nullif(btrim(regexp_replace(replace(replace(replace(translate(lower(coalesce(${colonne}, '')), '${AVEC.join('')}', '${SANS.join('')}'), 'œ', 'oe'), 'æ', 'ae'), 'ß', 'ss'), '\\s+', ' ', 'g')), '')`
+}
+
+const rangSource = (s: SourceRattachement, mode: ModeAuto): number =>
+  (mode === 'email' ? SOURCES_RATTACHEMENT_EMAIL : SOURCES_RATTACHEMENT_NOM).indexOf(s as never)
+
 /**
- * Le rattachement automatique PAR EMAIL des membres pas encore rattaches :
- * adresse non ambigue, verifiee sur un seul compte du site. Jamais par le
- * nom. Rejouable (apres l'import, puis quand de nouveaux comptes arrivent).
- * Rend les membres rattaches (leur id de Skool, jamais l'adresse).
+ * Les couples possibles (compte, membre de Skool), avec leur mode, leur
+ * meilleure source et ce qu'il faut pour decider. Une ligne par (compte,
+ * membre, mode). homonymes = le nombre de membres de Skool qui portent ce nom
+ * (1 pour le mode email).
  */
-export const SQL_RATTACHER_PAR_EMAIL = `
-with comptes as (
-  select lower(btrim(u.email)) as e, u.id
+const CTE_PAIRES = `
+with directs as (
+  select u.id, lower(btrim(u.email)) as e, 'connexion'::text as src, 1 as rang
     from auth.users u
    where u.email is not null and u.email_confirmed_at is not null
-  union
-  select lower(btrim(pe.email)), pe.profile_id
+  union all
+  select pe.profile_id, lower(btrim(pe.email)), 'secondaire', 2
     from public.profile_emails pe
    where pe.verified = true and pe.email is not null
-), uniques as (
-  select c.e, (array_agg(distinct c.id))[1] as id
-    from comptes c
-    join public.profiles p on p.id = c.id
-   group by c.e
-  having count(distinct c.id) = 1
+  union all
+  select i.user_id, lower(btrim(i.email)), 'invitation', 3
+    from public.academie_invitations i
+   where i.user_id is not null and i.email is not null
+  union all
+  select a.user_id, lower(btrim(a.email)), 'acces', 4
+    from public.academie_acces a
+   where a.user_id is not null and a.email is not null
+), fiches as (
+  select distinct d.id, f.membre_id
+    from directs d
+    join public.cockpit_membre_emails f on lower(btrim(f.email)) = d.e
+), emails as (
+  select d.id, d.e, d.src, d.rang from directs d
+  union all
+  select fi.id, lower(btrim(f.email)), 'fiche', 5
+    from fiches fi
+    join public.cockpit_membre_emails f on f.membre_id = fi.membre_id
+  union all
+  select fi.id, lower(btrim(p.payeur_email)), 'paiement', 6
+    from fiches fi
+    join public.cockpit_paiements p on p.membre_id = fi.membre_id
+   where p.payeur_email is not null
+), noms as (
+  select p.id, ${sqlNomNormalise('p.first_name')} as pn, ${sqlNomNormalise('p.last_name')} as nn, 'profil'::text as src, 1 as rang
+    from public.profiles p
+  union all
+  select fi.id, ${sqlNomNormalise('c.prenom')}, ${sqlNomNormalise('c.nom')}, 'fiche', 2
+    from fiches fi
+    join public.cockpit_membres c on c.membre_id = fi.membre_id
+), skool as (
+  select m.skool_member_id as s, m.email, m.email_source,
+         ${sqlNomNormalise('m.prenom')} as pn, ${sqlNomNormalise('m.nom')} as nn
+    from public.academie_skool_membres m
+), skool_noms as (
+  select k.s, k.pn, k.nn, count(*) over (partition by k.pn, k.nn) as homonymes
+    from skool k
+   where k.pn is not null and k.nn is not null
+), paires as (
+  select distinct on (x.id, x.s, x.mode) x.id, x.s, x.mode, x.src, x.homonymes
+    from (
+      select e.id, k.s, 'email'::text as mode, e.src, e.rang, 1::bigint as homonymes
+        from emails e
+        join skool k on k.email = e.e
+       where k.email_source not in ('aucune', 'ambigu-plusieurs-homonymes')
+      union all
+      select n.id, k.s, 'nom', n.src, n.rang, k.homonymes
+        from noms n
+        join skool_noms k on k.pn = n.pn and k.nn = n.nn
+       where n.pn is not null and n.nn is not null
+    ) x
+    join public.profiles p on p.id = x.id
+   order by x.id, x.s, x.mode, x.rang
 )
+select q.id::text as compte, q.s as membre, q.mode, q.src as source, q.homonymes::int as homonymes,
+       exists (select 1 from public.academie_skool_membres r where r.profile_id = q.id) as compte_relie,
+       exists (select 1 from public.academie_skool_membres r where r.skool_member_id = q.s and r.profile_id is not null) as membre_relie,
+       (exists (select 1 from emails e join public.cockpit_oublis_emails o on o.email_hash = public.cockpit_hash_email(e.e)
+                 where e.id = q.id)
+        or exists (select 1 from skool k join public.cockpit_oublis_emails o on o.email_hash = public.cockpit_hash_email(k.email)
+                    where k.s = q.s and k.email is not null)) as oublie
+  from paires q`
+
+/** Tous les couples possibles (le script de rattrapage et l'import, a blanc ou pour de vrai). */
+export const SQL_PAIRES_RATTACHEMENT = `${CTE_PAIRES}
+ order by 1, 2, 3
+`
+
+/**
+ * $1 = compte : les couples qui touchent un membre que ce compte retrouve
+ * (tous les comptes de ces membres, pour la verification dans les deux sens).
+ * Vide pour un compte qui ne retrouve personne : le cas courant, leger.
+ */
+export const SQL_PAIRES_RATTACHEMENT_COMPTE = `${CTE_PAIRES}
+ where q.s in (select z.s from paires z where z.id = $1::uuid)
+ order by 1, 2, 3
+`
+
+/**
+ * Le rattachement automatique, garde par la base : $1 compte, $2 membre de
+ * Skool, $3 mode (email, nom), $4 source. Ni un membre deja rattache, ni un
+ * compte deja rattache (deux passages simultanes : le second ne trouve plus
+ * profile_id vide). Rend le membre rattache (aucune ligne = rien fait).
+ */
+export const SQL_RATTACHER_AUTO = `
 update public.academie_skool_membres m set
-  profile_id = u.id,
-  rattache_mode = 'email',
+  profile_id = $1::uuid,
+  rattache_mode = $3::text,
+  rattache_source = $4::text,
   rattache_par = null,
   rattache_le = now(),
   maj_le = now()
-  from uniques u
- where u.e = m.email
+ where m.skool_member_id = $2::text
    and m.profile_id is null
-   and m.email is not null
-   and m.email_source not in ('aucune', 'ambigu-plusieurs-homonymes')
+   and $3::text in ('email', 'nom')
+   and not exists (select 1 from public.academie_skool_membres x where x.profile_id = $1::uuid)
+   and exists (select 1 from public.profiles p where p.id = $1::uuid)
 returning m.skool_member_id
 `
+
+/**
+ * Le rattachement A LA MAIN (equipe) : $1 membre de Skool, $2 compte, $3 le
+ * compte d'equipe qui l'a decide. Seulement si ni le membre ni le compte ne
+ * sont deja rattaches : un filet, qui ne joue que si l'automatique n'a rien fait.
+ */
+export const SQL_RATTACHER_A_LA_MAIN = `
+update public.academie_skool_membres m set
+  profile_id = $2::uuid,
+  rattache_mode = 'equipe',
+  rattache_source = null,
+  rattache_par = $3::uuid,
+  rattache_le = now(),
+  maj_le = now()
+ where m.skool_member_id = $1::text
+   and m.profile_id is null
+   and not exists (select 1 from public.academie_skool_membres x where x.profile_id = $2::uuid)
+   and exists (select 1 from public.profiles p where p.id = $2::uuid)
+returning m.skool_member_id
+`
+
+/** Brice (le compte d'equipe qui a confirme les rattachements a la main du 15/11). */
+export const COMPTE_BRICE = '0636a40b-13a4-4fe8-af11-d060e2810767'
+
+/**
+ * Les rattachements A LA MAIN, confirmes par Brice dans la conversation de
+ * l'orchestre le 15/11 : un membre de Skool vers un compte du site, mode
+ * equipe. Un filet : ils ne jouent que si l'automatique ne les a pas faits.
+ * Ni email ni nom ici : des identifiants.
+ */
+export const RATTACHEMENTS_A_LA_MAIN: readonly { membre: string; compte: string; par: string; note: string }[] = [
+  { membre: '91b8c4f373e54933a8efd6afd043d8c1', compte: 'ef210909-1b85-4c60-a408-b6ad232a8eef', par: COMPTE_BRICE,
+    note: 'Son compte a un autre email que Skool et pas de nom de famille (confirme par Brice le 15/11).' },
+]
+
+export type PaireRattachement = {
+  compte: string
+  membre: string
+  mode: ModeAuto
+  source: SourceRattachement
+  /** Le nombre de membres de Skool qui portent ce nom (1 en mode email). */
+  homonymes: number
+  compteRelie: boolean
+  membreRelie: boolean
+  /** Un email du compte ou du membre est dans la liste d'oubli (personne effacee). */
+  oublie: boolean
+}
+
+type LignePaire = {
+  compte: string; membre: string; mode: string; source: string; homonymes: number | bigint
+  compte_relie: boolean; membre_relie: boolean; oublie: boolean
+}
+
+/** Les lignes de SQL_PAIRES_RATTACHEMENT(_COMPTE) en couples (une ligne illisible est ecartee). */
+export function lirePaires(lignes: readonly LignePaire[]): PaireRattachement[] {
+  const sortie: PaireRattachement[] = []
+  for (const l of lignes) {
+    const mode = l.mode === 'email' || l.mode === 'nom' ? l.mode : null
+    if (!mode) continue
+    const sources: readonly string[] = mode === 'email' ? SOURCES_RATTACHEMENT_EMAIL : SOURCES_RATTACHEMENT_NOM
+    if (!sources.includes(l.source)) continue
+    sortie.push({
+      compte: String(l.compte), membre: String(l.membre), mode, source: l.source as SourceRattachement,
+      homonymes: Number(l.homonymes) || 0,
+      compteRelie: l.compte_relie === true, membreRelie: l.membre_relie === true, oublie: l.oublie === true,
+    })
+  }
+  return sortie
+}
+
+export type Rattachement = { compte: string; membre: string; mode: ModeAuto; source: SourceRattachement }
+export type MotifRefusRattachement =
+  | 'ambigu_compte' // le compte retrouve plusieurs membres de Skool
+  | 'ambigu_membre' // le membre retrouve plusieurs comptes (ou un autre compte en priorite)
+  | 'membre_relie' // le membre est deja rattache a un autre compte
+  | 'oublie' // personne effacee
+
+export type DecisionRattachements = {
+  rattachements: Rattachement[]
+  refus: { compte: string; membre: string | null; motif: MotifRefusRattachement }[]
+  /** Comptes deja rattaches qui retrouvent un membre (rien a faire). */
+  dejaRelies: number
+  /** Comptes rattaches par l'email alors qu'un nom designe un AUTRE membre (la priorite a l'email a tranche). */
+  emailContreNom: number
+  /** Comptes pas encore rattaches qui ne retrouvent un membre que par un nom porte par plusieurs membres de Skool. */
+  nomsHomonymes: number
+}
+
+type Choix = { id: string; mode: ModeAuto; source: SourceRattachement } | 'ambigu' | null
+
+/** Un seul choix, l'email d'abord, puis le nom (un nom porte par plusieurs membres de Skool ne compte pas). */
+function choisir(liste: readonly PaireRattachement[], cle: 'membre' | 'compte'): Choix {
+  const email = liste.filter(p => p.mode === 'email')
+  const retenues = email.length ? email : liste.filter(p => p.mode === 'nom')
+  const ids = new Set(retenues.map(p => p[cle]))
+  if (ids.size === 0) return null
+  if (ids.size > 1) return 'ambigu'
+  const meilleure = [...retenues].sort((a, b) => rangSource(a.source, a.mode) - rangSource(b.source, b.mode))[0]
+  return { id: meilleure[cle], mode: meilleure.mode, source: meilleure.source }
+}
+
+/**
+ * LA decision, la meme partout : un compte pas encore rattache est rattache a
+ * un membre de Skool quand le compte ne retrouve que lui ET qu'il ne retrouve
+ * que ce compte (l'email d'abord, puis le nom), que le membre n'est pas deja
+ * rattache et que personne n'a ete efface. Tout le reste attend un
+ * rattachement a la main (volet 3 du cockpit).
+ */
+export function deciderRattachements(paires: readonly PaireRattachement[]): DecisionRattachements {
+  const valides = paires.filter(p => p.mode === 'email' || p.homonymes === 1)
+  const parCompte = new Map<string, PaireRattachement[]>()
+  const parMembre = new Map<string, PaireRattachement[]>()
+  for (const p of valides) {
+    parCompte.set(p.compte, [...(parCompte.get(p.compte) ?? []), p])
+    parMembre.set(p.membre, [...(parMembre.get(p.membre) ?? []), p])
+  }
+  const decision: DecisionRattachements = { rattachements: [], refus: [], dejaRelies: 0, emailContreNom: 0, nomsHomonymes: 0 }
+  const homonymes = new Set(paires.filter(p => !p.compteRelie && !parCompte.has(p.compte)).map(p => p.compte))
+  decision.nomsHomonymes = homonymes.size
+  for (const [compte, liste] of [...parCompte].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    if (liste.some(p => p.compteRelie)) { decision.dejaRelies++; continue }
+    const aller = choisir(liste, 'membre')
+    if (aller === null) continue
+    if (aller === 'ambigu') { decision.refus.push({ compte, membre: null, motif: 'ambigu_compte' }); continue }
+    // Un membre deja rattache (a un autre compte : celui-ci ne l'est pas) n'est jamais touche.
+    if (liste.some(p => p.membre === aller.id && p.membreRelie)) {
+      decision.refus.push({ compte, membre: aller.id, motif: 'membre_relie' })
+      continue
+    }
+    const retour = choisir(parMembre.get(aller.id) ?? [], 'compte')
+    if (retour === null || retour === 'ambigu' || retour.id !== compte || retour.mode !== aller.mode) {
+      decision.refus.push({ compte, membre: aller.id, motif: 'ambigu_membre' })
+      continue
+    }
+    if (liste.some(p => p.oublie) || (parMembre.get(aller.id) ?? []).some(p => p.oublie)) {
+      decision.refus.push({ compte, membre: aller.id, motif: 'oublie' })
+      continue
+    }
+    if (aller.mode === 'email' && liste.some(p => p.mode === 'nom' && p.membre !== aller.id)) decision.emailContreNom++
+    decision.rattachements.push({ compte, membre: aller.id, mode: aller.mode, source: aller.source })
+  }
+  return decision
+}
+
+// ---------------------------------------------------------------------------
+// Le PRE-REMPLISSAGE de l'avancee de Skool (point 2 du brief)
+// ---------------------------------------------------------------------------
+//
+// Des qu'un compte est rattache (quel que soit le mode) et a un releve, chaque
+// cours de Skool de CORRESPONDANCE_SKOOL qui a un module ET sure = true est
+// rempli (les deux cours douteux gardent seulement le bouton) :
+//   - cours fini (lecons terminees >= lecons du cours) : toutes les lecons
+//     publiees du module, ou de la partie quand le cours correspond a une partie ;
+//   - cours en partie fait : les premieres lecons publiees, dans l'ordre de
+//     l'academie (lecons sans partie, puis les parties, puis les lecons), au
+//     meme pourcentage : round(terminees / total x N), au moins 1 ;
+//   - une lecon qui a deja une ligne de progression (vue, ouverte, cochee) n'est
+//     JAMAIS touchee : on n'ajoute que les lecons manquantes ;
+//   - les memes marques que le bouton : vu_le et vu_par = 'reprise', nb_sessions
+//     = 0, ni terminee_le ni marquee_vue_le, aucun temps, aucun point ;
+//   - une ligne academie_reprises en mode auto (par vide), avec le MEME verrou
+//     que le bouton : le bouton disparait pour ce cours, le « une fois » tient en
+//     base, un deuxieme passage n'ajoute rien. Pas de fenetre de 30 jours.
+
+/** Les cours de Skool qui se remplissent tout seuls : un module, et une correspondance sure. */
+export const COURS_SKOOL_REMPLIS: ReadonlySet<string> = new Set(
+  CORRESPONDANCE_SKOOL.filter(c => c.module !== null && c.sure).map(c => c.skool),
+)
+const LISTE_SQL_COURS_REMPLIS = [...COURS_SKOOL_REMPLIS].map(id => `'${id}'`).join(', ')
+
+/**
+ * $1 = compte. En une lecture : rattache ou non, le releve de ses membres de
+ * Skool rattaches (cours remplis seulement), et les verrous deja poses (bouton
+ * ou pre-remplissage).
+ */
+export const SQL_ETAT_AUTO = `
+select
+  exists (select 1 from public.academie_skool_membres m where m.profile_id = $1::uuid) as relie,
+  coalesce((
+    select json_agg(json_build_object('cours', ps.skool_cours_id, 'titre', ps.skool_cours_titre,
+                                      'terminees', ps.lecons_terminees, 'total', ps.lecons_total, 'le', ps.releve_le::text))
+      from public.academie_progression_skool ps
+      join public.academie_skool_membres m on m.skool_member_id = ps.skool_member_id
+     where m.profile_id = $1::uuid and ps.lecons_total > 0
+       and ps.skool_cours_id in (${LISTE_SQL_COURS_REMPLIS})
+  ), '[]'::json) as releve,
+  coalesce((
+    select array_agg(r.verrou)
+      from public.academie_reprises r
+     where r.user_id = $1::uuid and r.mode in ('membre', 'auto') and r.verrou is not null
+  ), '{}'::text[]) as verrous
+`
+
+// Les memes lectures pour toute la base (scripts/rattraper-reprise-skool.mjs).
+
+/** Le releve des cours remplis, de tous les membres de Skool (rattaches ou non). */
+export const SQL_RELEVE_REMPLIS_TOUS = `
+select ps.skool_member_id as membre, m.profile_id::text as compte, ps.skool_cours_id as cours, ps.skool_cours_titre as titre,
+       ps.lecons_terminees as terminees, ps.lecons_total as total, ps.releve_le::text as le
+  from public.academie_progression_skool ps
+  join public.academie_skool_membres m on m.skool_member_id = ps.skool_member_id
+ where ps.lecons_total > 0 and ps.skool_cours_id in (${LISTE_SQL_COURS_REMPLIS})
+`
+
+/** Les verrous deja poses (bouton ou pre-remplissage), de tous les comptes. */
+export const SQL_VERROUS_TOUS = `
+select r.user_id::text as compte, r.verrou
+  from public.academie_reprises r
+ where r.mode in ('membre', 'auto') and r.verrou is not null
+`
+
+/** Les membres de Skool qui ont un historique (au moins une lecon terminee dans un cours qui a son equivalent). */
+export const SQL_MEMBRES_AVEC_HISTORIQUE = `
+select distinct ps.skool_member_id as membre
+  from public.academie_progression_skool ps
+ where ps.lecons_terminees > 0 and ps.lecons_total > 0
+   and ps.skool_cours_id in (${LISTE_SQL_COURS_HISTORIQUE})
+`
+
+/** $1 = comptes, $2 = lecons : les lignes de progression qui existent deja (jamais touchees). */
+export const SQL_PROGRESSION_EXISTANTE = `
+select p.user_id::text as compte, p.lecon_id::text as lecon
+  from public.academie_progression p
+ where p.user_id = any($1::uuid[]) and p.lecon_id = any($2::uuid[])
+`
+
+type LigneReleveJson = { cours: string; titre: string; terminees: number; total: number; le: string }
+
+/** Le releve tel que SQL_ETAT_AUTO le rend, en lignes de releve. */
+export function releveDeJson(v: unknown): LigneReleveCompte[] {
+  const liste = Array.isArray(v) ? v as LigneReleveJson[] : []
+  return liste
+    .filter(l => l && typeof l.cours === 'string')
+    .map(l => ({
+      skoolCoursId: l.cours, skoolCoursTitre: String(l.titre ?? ''), leconsTerminees: Number(l.terminees) || 0,
+      leconsTotal: Number(l.total) || 0, releveLe: String(l.le ?? ''),
+    }))
+}
+
+export type CatalogueRemplissage = {
+  modules: readonly { id: string; slug: string; statut: string; lienExterne: string | null }[]
+  sections: readonly { id: string; moduleId: string; ordre: number; titre: string }[]
+  lecons: readonly { id: string; moduleId: string; sectionId: string | null; ordre: number; titre: string; statut: string }[]
+}
+
+const parOrdre = <T extends { ordre: number; titre: string }>(a: T, b: T) =>
+  a.ordre - b.ordre || (a.titre < b.titre ? -1 : a.titre > b.titre ? 1 : 0)
+
+/**
+ * Les lecons PUBLIEES d'un module, dans l'ordre de l'academie : celles sans
+ * partie (ou d'une partie inconnue) d'abord, puis chaque partie dans son
+ * ordre, ses lecons dans leur ordre. sectionId : seulement cette partie.
+ */
+export function leconsDansLOrdre(cat: CatalogueRemplissage, moduleId: string, sectionId: string | null = null): string[] {
+  const sections = cat.sections.filter(s => s.moduleId === moduleId).sort(parOrdre)
+  const publiees = cat.lecons.filter(l => l.moduleId === moduleId && l.statut === 'publie').sort(parOrdre)
+  const connues = new Set(sections.map(s => s.id))
+  const ordre = [
+    ...publiees.filter(l => !l.sectionId || !connues.has(l.sectionId)),
+    ...sections.flatMap(s => publiees.filter(l => l.sectionId === s.id)),
+  ]
+  return ordre.filter(l => sectionId === null || l.sectionId === sectionId).map(l => l.id)
+}
+
+/** Combien de lecons cocher pour un cours : tout s'il est fini, sinon la meme part, au moins 1 si Skool en montre une. */
+export function nombreACocher(terminees: number, total: number, publiees: number): number {
+  if (!(total > 0) || !(publiees > 0) || !(terminees > 0)) return 0
+  if (terminees >= total) return publiees
+  return Math.min(publiees, Math.max(1, Math.round((terminees / total) * publiees)))
+}
+
+export type CoursRempli = {
+  skool: string
+  titre: string
+  fini: boolean
+  terminees: number
+  total: number
+  /** Lecons publiees de la cible dans l'academie. */
+  publiees: number
+  /** Lecons visees (les premieres, dans l'ordre). */
+  visees: number
+}
+
+export type ItemRemplissage = {
+  verrou: string
+  moduleId: string
+  sectionId: string | null
+  portee: 'module' | 'section'
+  /** Les lecons visees, dans l'ordre de l'academie (celles qui ont deja une ligne seront laissees). */
+  lecons: string[]
+  /** Le repere de Skool de la cible, garde dans le journal (null = aucun). */
+  pourcentage: number | null
+  cours: CoursRempli[]
+}
+
+/**
+ * Ce que le pre-remplissage ferait pour un compte rattache : un item par
+ * verrou pas encore pose. Le dernier releve de chaque cours ; deux membres de
+ * Skool sur le meme compte : le plus avance. Un module non publie, un lien
+ * externe ou une cible sans lecon publiee : rien (le cours sera rempli quand
+ * il aura des lecons).
+ */
+export function planRemplissage(p: {
+  releve: readonly LigneReleveCompte[]
+  catalogue: CatalogueRemplissage
+  verrousFaits: ReadonlySet<string> | readonly string[]
+  regle?: RegleUneFois
+  liste?: readonly CorrespondanceSkool[]
+}): ItemRemplissage[] {
+  const regle = p.regle ?? REPRISE_UNE_FOIS_PAR
+  const liste = p.liste ?? CORRESPONDANCE_SKOOL
+  const faits = new Set(p.verrousFaits)
+  const parCours = new Map<string, LigneReleveCompte>()
+  for (const l of p.releve) {
+    if (!(l.leconsTotal > 0)) continue
+    const avant = parCours.get(l.skoolCoursId)
+    if (!avant || l.releveLe > avant.releveLe || (l.releveLe === avant.releveLe && l.leconsTerminees > avant.leconsTerminees)) {
+      parCours.set(l.skoolCoursId, l)
+    }
+  }
+  const reperes = reperesSkool(p.releve, p.catalogue, liste)
+  const items = new Map<string, ItemRemplissage & { cibles: Set<string>; entier: boolean; parties: Set<string> }>()
+  for (const l of [...parCours.values()].sort((a, b) => (a.skoolCoursId < b.skoolCoursId ? -1 : 1))) {
+    if (!(l.leconsTerminees > 0)) continue
+    const c = correspondanceDe(l.skoolCoursId, l.skoolCoursTitre, liste)
+    if (!c || !c.module || !c.sure) continue
+    const m = p.catalogue.modules.find(x => x.slug === c.module)
+    if (!m || m.statut !== 'publie' || m.lienExterne) continue
+    let sectionId: string | null = null
+    if (c.section) {
+      const prefixe = normaliserTitre(c.section)
+      const s = p.catalogue.sections.find(x => x.moduleId === m.id && normaliserTitre(x.titre).startsWith(prefixe))
+      if (!s) continue
+      sectionId = s.id
+    }
+    const publiees = leconsDansLOrdre(p.catalogue, m.id, sectionId)
+    const n = nombreACocher(l.leconsTerminees, l.leconsTotal, publiees.length)
+    if (n === 0) continue
+    const verrou = verrouReprise(regle, m.id, sectionId)
+    if (faits.has(verrou)) continue
+    const item = items.get(verrou) ?? {
+      verrou, moduleId: m.id, sectionId: null, portee: 'module' as const, lecons: [], pourcentage: null, cours: [],
+      cibles: new Set<string>(), entier: false, parties: new Set<string>(),
+    }
+    for (const id of publiees.slice(0, n)) item.cibles.add(id)
+    if (sectionId) item.parties.add(sectionId)
+    else item.entier = true
+    item.cours.push({
+      skool: l.skoolCoursId, titre: c.titre, fini: l.leconsTerminees >= l.leconsTotal, terminees: l.leconsTerminees,
+      total: l.leconsTotal, publiees: publiees.length, visees: n,
+    })
+    items.set(verrou, item)
+  }
+  return [...items.values()].map(({ cibles, entier, parties, ...item }) => {
+    const seule = !entier && parties.size === 1 ? [...parties][0] : null
+    const repere = reperes.get(seule ? `section:${seule}` : `module:${item.moduleId}`)
+    return {
+      ...item,
+      sectionId: seule,
+      portee: seule ? 'section' as const : 'module' as const,
+      lecons: leconsDansLOrdre(p.catalogue, item.moduleId).filter(id => cibles.has(id)),
+      pourcentage: repere?.pourcentage ?? null,
+    }
+  })
+}
+
+/**
+ * La ligne du journal en mode auto, AVANT les lecons : $1 compte, $2 module,
+ * $3 section (ou null), $4 portee, $5 verrou, $6 repere de Skool (ou null).
+ * par vide. Aucune ligne rendue = deja fait (bouton ou passage precedent :
+ * l'index unique couvre membre ET auto).
+ */
+export const SQL_POSER_REPRISE_AUTO = `
+insert into public.academie_reprises (user_id, module_id, section_id, portee, mode, par, verrou, deja_vues, pourcentage_skool)
+values ($1::uuid, $2::uuid, $3::uuid, $4::text, 'auto', null, $5::text, 0, $6::smallint)
+on conflict (user_id, verrou) where mode in ('membre', 'auto') do nothing
+returning id::text as id
+`
+
+/**
+ * Coche les lecons MANQUANTES : $1 compte, $2 lecons (uuid[]). Une lecon qui a
+ * deja une ligne (vue, ouverte, cochee, decochee) n'est jamais touchee (do
+ * nothing). Les memes marques que le bouton : vu_le, vu_par = 'reprise',
+ * nb_sessions = 0 ; ni terminee_le ni marquee_vue_le. Seulement des lecons
+ * publiees d'un module publie. Rend les lecons cochees.
+ */
+export const SQL_COCHER_REPRISE_AUTO = `
+insert into public.academie_progression as p (user_id, lecon_id, derniere_vue_le, nb_sessions, vu_le, vu_par)
+select $1::uuid, l.id, now(), 0, now(), 'reprise'
+  from public.academie_lecons l
+  join public.academie_modules m on m.id = l.module_id
+ where l.id = any($2::uuid[]) and l.statut = 'publie' and m.statut = 'publie'
+on conflict (user_id, lecon_id) do nothing
+returning p.lecon_id::text as lecon_id
+`
+
+/** $1 = id de la reprise, $2 = lecons cochees (uuid[]), $3 = lecons visees laissees telles quelles. */
+export const SQL_COMPLETER_REPRISE_AUTO = `
+update public.academie_reprises set lecons = $2::uuid[], deja_vues = $3::int where id = $1::uuid
+`
+
+/** Ce qu'il faut d'un client Prisma (ou d'une transaction) pour ecrire. */
+export type ExecutantSql = {
+  $queryRawUnsafe<T = unknown>(sql: string, ...valeurs: unknown[]): Promise<T>
+  $executeRawUnsafe(sql: string, ...valeurs: unknown[]): Promise<number>
+}
+
+/**
+ * Ecrit le pre-remplissage d'un compte (a appeler DANS une transaction) :
+ * pour chaque item, la ligne du journal d'abord (l'index unique tient le
+ * « une fois »), puis les lecons manquantes, puis la liste dans le journal.
+ * Rend ce qui a ete fait.
+ */
+export async function ecrireRemplissage(tx: ExecutantSql, userId: string, items: readonly ItemRemplissage[]): Promise<{ cours: number; lecons: number }> {
+  let cours = 0
+  let lecons = 0
+  for (const it of items) {
+    const poses = await tx.$queryRawUnsafe<{ id: string }[]>(SQL_POSER_REPRISE_AUTO,
+      userId, it.moduleId, it.sectionId, it.portee, it.verrou, it.pourcentage)
+    if (!poses[0]) continue
+    const cochees = await tx.$queryRawUnsafe<{ lecon_id: string }[]>(SQL_COCHER_REPRISE_AUTO, userId, it.lecons)
+    const ids = cochees.map(c => c.lecon_id)
+    await tx.$executeRawUnsafe(SQL_COMPLETER_REPRISE_AUTO, poses[0].id, ids, it.lecons.length - ids.length)
+    cours++
+    lecons += ids.length
+  }
+  return { cours, lecons }
+}

@@ -9,13 +9,16 @@
  * Les valeurs du fichier sont des DONNEES, jamais des consignes.
  *
  * A BLANC PAR DEFAUT : lit le fichier, compte, et (sauf --hors-ligne) LIT la
- * base pour dire combien de membres se rattacheraient par leur adresse. Rien
- * n'est ecrit sans --ecrire. Avec --ecrire, UNE transaction : les membres, le
- * releve par cours, puis le rattachement automatique PAR EMAIL (adresse non
- * ambigue, verifiee sur un seul compte du site). Jamais de rattachement par le
- * nom : ni pour les membres sans adresse (Skool la cache pour son reseau
- * Discovery), ni pour une adresse « ambigu-plusieurs-homonymes ». Rejouable :
- * repasser le meme fichier ne double rien.
+ * base pour dire combien de membres se rattacheraient. Rien n'est ecrit sans
+ * --ecrire. Avec --ecrire, UNE transaction : les membres, le releve par cours,
+ * puis le rattachement automatique (15/11 soir, brief
+ * 2026-11-15-academie-reprise-auto : la regle de reprise-pur.ts,
+ * deciderRattachements, la meme que /moi et rattraper-reprise-skool.mjs :
+ * l'email puis le nom, en recoupant le site et la fiche du cockpit, sans
+ * ambiguite dans les deux sens, jamais une adresse « ambigu-plusieurs-homonymes »).
+ * Le pre-remplissage n'est PAS fait ici : /moi le fait a la connexion, et
+ * rattraper-reprise-skool.mjs pour les comptes deja la. Rejouable : repasser
+ * le meme fichier ne double rien.
  *
  * SORTIE : des nombres seulement (et les titres des cours de Skool, qui ne
  * sont pas des donnees de membre). Jamais une adresse ni un nom, nulle part.
@@ -130,6 +133,13 @@ try {
   const [oublis] = await prisma.$queryRawUnsafe(`select count(*)::int as n from unnest($1::text[]) as e(x)
     where exists (select 1 from public.cockpit_oublis_emails o where o.email_hash = public.cockpit_hash_email(e.x))`, tousEmails)
   console.log(`  adresses effacees (sautees)       ${oublis.n}`)
+  // (15/11 soir) Ce que le rattachement automatique ferait sur la base telle qu'elle est (avant cet import).
+  try {
+    const d = R.deciderRattachements(R.lirePaires(await prisma.$queryRawUnsafe(R.SQL_PAIRES_RATTACHEMENT)))
+    console.log(`  rattachables automatiquement      ${d.rattachements.length} (par email ${d.rattachements.filter(r => r.mode === 'email').length}, par nom ${d.rattachements.filter(r => r.mode === 'nom').length}) ; ambigus ${d.refus.length}`)
+  } catch (e) {
+    if (!tableAbsente(e)) throw e
+  }
 
   let dejaEnBase = null
   try {
@@ -162,16 +172,22 @@ try {
           coursCrees += c.filter(x => x.cree).length
           coursMaj += c.filter(x => !x.cree).length
         }
-        const rattaches = await tx.$queryRawUnsafe(R.SQL_RATTACHER_PAR_EMAIL)
+        // Le rattachement automatique : la meme decision que /moi, gardee par la base ligne a ligne.
+        const decision = R.deciderRattachements(R.lirePaires(await tx.$queryRawUnsafe(R.SQL_PAIRES_RATTACHEMENT)))
+        const rattaches = []
+        for (const r of decision.rattachements) {
+          const fait = await tx.$queryRawUnsafe(R.SQL_RATTACHER_AUTO, r.compte, r.membre, r.mode, r.source)
+          if (fait[0]) rattaches.push(r)
+        }
         return {
           membresCrees: m.filter(x => x.cree).length, membresMaj: m.filter(x => !x.cree).length,
-          coursCrees, coursMaj, rattaches: rattaches.length,
+          coursCrees, coursMaj, rattaches,
         }
       }, { timeout: 60_000 })
       console.log('\nECRIT :')
       console.log(`  membres crees ${bilan.membresCrees}, mis a jour ${bilan.membresMaj}, inchanges ou effaces ${liste.length - bilan.membresCrees - bilan.membresMaj}`)
       console.log(`  lignes crees ${bilan.coursCrees}, mises a jour ${bilan.coursMaj}, inchangees ${gardees.length - bilan.coursCrees - bilan.coursMaj}`)
-      console.log(`  rattaches par adresse ${bilan.rattaches}`)
+      console.log(`  rattaches automatiquement ${bilan.rattaches.length} (par email ${bilan.rattaches.filter(r => r.mode === 'email').length}, par nom ${bilan.rattaches.filter(r => r.mode === 'nom').length})`)
     }
   }
 } catch (e) {

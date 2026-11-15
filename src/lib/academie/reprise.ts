@@ -15,15 +15,18 @@ import { prisma } from '@/lib/db'
 import type { Catalogue } from './catalogue'
 import { ouvertureLecon, type Droits } from './pur'
 import {
-  REPRISE_UNE_FOIS_PAR, REPRISES_PAR_HEURE, SQL_COCHER_REPRISE, SQL_COMPLETER_REPRISE, SQL_FAITS_REPRISE, SQL_POSER_REPRISE,
-  SQL_RELEVE_DU_COMPTE, SQL_REPRISES_DU_COMPTE, SQL_REPRISES_HEURE, etatReprise, planReprise, reperesSkool,
-  type EtatReprise, type LeconPourReprise, type LigneReleveCompte, type RefusReprise, type Repere, type RepriseFaite,
+  MODES_UNE_FOIS, REPRISE_UNE_FOIS_PAR, REPRISES_PAR_HEURE, SQL_COCHER_REPRISE, SQL_COMPLETER_REPRISE, SQL_ETAT_AUTO,
+  SQL_FAITS_REPRISE, SQL_PAIRES_RATTACHEMENT_COMPTE, SQL_POSER_REPRISE, SQL_RATTACHER_AUTO, SQL_RELEVE_DU_COMPTE,
+  SQL_REPRISES_DU_COMPTE, SQL_REPRISES_HEURE, deciderRattachements, ecrireRemplissage, etatReprise, lirePaires, planReprise,
+  planRemplissage, releveDeJson, reperesSkool,
+  type EtatReprise, type LeconPourReprise, type LigneReleveCompte, type ModeReprise, type Rattachement, type RefusReprise,
+  type Repere, type RepriseFaite,
 } from './reprise-pur'
 import type { ProgressionLecon } from './suivi'
 
 type LigneFaits = { releve_skool: boolean; ancien: boolean; arrivee: Date | null; maintenant: Date }
 type LigneReleve = { skool_cours_id: string; skool_cours_titre: string; lecons_terminees: number; lecons_total: number; releve_le: string }
-type LigneReprise = { module_id: string; section_id: string | null; mode: 'membre' | 'equipe' }
+type LigneReprise = { module_id: string; section_id: string | null; mode: ModeReprise; lecons: number | null }
 
 export type SituationReprise = {
   etat: EtatReprise
@@ -46,7 +49,7 @@ export async function situationReprise(userId: string): Promise<SituationReprise
       arrivee: f?.arrivee ?? null,
       maintenant: f?.maintenant ?? new Date(),
     }),
-    faites: faites.map(r => ({ moduleId: r.module_id, sectionId: r.section_id, mode: r.mode })),
+    faites: faites.map(r => ({ moduleId: r.module_id, sectionId: r.section_id, mode: r.mode, lecons: Number(r.lecons) || 0 })),
     releve: releve.map(r => ({
       skoolCoursId: r.skool_cours_id,
       skoolCoursTitre: r.skool_cours_titre,
@@ -71,6 +74,9 @@ export function reperePublic(r: Repere | undefined) {
  * Ce que /moi rend : le bouton (possible = historique ET dans la fenetre) et
  * ce qui est deja utilise. Sans historique : possible et historique faux, la
  * page ne montre rien. Jamais la source de l'historique ni le releve brut.
+ * faites (15/11 soir) : le bouton (mode membre) ET le pre-remplissage depuis
+ * Skool (mode auto), avec le nombre de lecons cochees : la page cache le
+ * bouton de ces cours et dit « N lecons cochees depuis Skool ».
  */
 export function vueReprise(s: SituationReprise) {
   return {
@@ -78,8 +84,57 @@ export function vueReprise(s: SituationReprise) {
     historique: s.etat.historique,
     jusquau: s.etat.jusquau?.toISOString() ?? null,
     une_fois_par: REPRISE_UNE_FOIS_PAR,
-    faites: s.faites.filter(f => f.mode === 'membre').map(f => ({ module_id: f.moduleId, section_id: f.sectionId })),
+    faites: s.faites.filter(f => MODES_UNE_FOIS.includes(f.mode))
+      .map(f => ({ module_id: f.moduleId, section_id: f.sectionId, mode: f.mode, lecons: f.lecons ?? 0 })),
   }
+}
+
+// ---------------------------------------------------------------------------
+// Le rattachement automatique et le pre-remplissage (15/11/2026 soir)
+// ---------------------------------------------------------------------------
+
+type LigneEtatAuto = { relie: boolean; releve: unknown; verrous: string[] | null }
+
+export type BilanAuto = { rattache: Rattachement | null; cours: number; lecons: number }
+
+/**
+ * Le rattachement d'un compte pas encore rattache (reprise-pur.ts,
+ * deciderRattachements : sans ambiguite dans les deux sens), garde par la
+ * base. null = rien fait.
+ */
+export async function rattacherAuto(userId: string): Promise<Rattachement | null> {
+  const paires = lirePaires(await prisma.$queryRawUnsafe(SQL_PAIRES_RATTACHEMENT_COMPTE, userId))
+  const choix = deciderRattachements(paires).rattachements.find(r => r.compte === userId)
+  if (!choix) return null
+  const fait = await prisma.$queryRawUnsafe<{ skool_member_id: string }[]>(SQL_RATTACHER_AUTO, userId, choix.membre, choix.mode, choix.source)
+  return fait[0] ? choix : null
+}
+
+/**
+ * A chaque passage par /moi, AVANT la lecture de la progression : rattache le
+ * compte s'il ne l'est pas (et que c'est sans ambiguite), puis remplit les
+ * cours de Skool qui ne le sont pas encore, dans une transaction. Leger dans
+ * le cas courant : une lecture (deja rattache et rempli), ou une lecture et
+ * la recherche des couples (personne a rattacher). Jette sur une panne : /moi
+ * l'attrape et continue sans.
+ */
+export async function repriseAutomatique(userId: string, catalogue: Catalogue): Promise<BilanAuto> {
+  const lire = async () => (await prisma.$queryRawUnsafe<LigneEtatAuto[]>(SQL_ETAT_AUTO, userId))[0]
+  let etat = await lire()
+  let rattache: Rattachement | null = null
+  if (!etat?.relie) {
+    rattache = await rattacherAuto(userId)
+    if (!rattache) return { rattache: null, cours: 0, lecons: 0 }
+    etat = await lire()
+  }
+  const items = planRemplissage({ releve: releveDeJson(etat?.releve), catalogue, verrousFaits: etat?.verrous ?? [] })
+  if (items.length === 0) return { rattache, cours: 0, lecons: 0 }
+  const fait = await prisma.$transaction(async tx => {
+    await tx.$executeRawUnsafe(`set local lock_timeout = '3s'`)
+    await tx.$executeRawUnsafe(`set local statement_timeout = '8s'`)
+    return ecrireRemplissage(tx, userId, items)
+  }, { timeout: 10_000, maxWait: 3_000 })
+  return { rattache, ...fait }
 }
 
 /** Les lecons d'un module, jugees pour la reprise (memes droits que /moi). */
