@@ -1,6 +1,6 @@
 # ETAT du journal d etudes
 
-## REPRISE DE LA PROGRESSION DES MEMBRES DE SKOOL : « DEJA VU AVANT » ET IMPORT DU RELEVE (15/11/2026, carte 382, commite NON pousse, branche academie-reprise-progression depuis origin/master a2c18b6 ; migration 20261115180000 du workspace ECRITE NON appliquee)
+## REPRISE DE LA PROGRESSION DES MEMBRES DE SKOOL : « DEJA VU AVANT » ET IMPORT DU RELEVE (15/11/2026, carte 382, commite NON pousse, branche academie-reprise-progression rebasee sur origin/master aa20d19 (lives en production) ; migration 20261115180000 du workspace ECRITE NON appliquee)
 
 - Briefs : D:\7_Agents\briefs\2026-11-15-academie-reprise-progression-skool.md et ...-codeur.md (mise a jour du 15/11
   apres-midi : le releve de Yume). Rapport : D:\7_Agents\briefs\academie-reprise-progression-rapport.md. Site et Cockpit :
@@ -32,14 +32,23 @@
 - Lecteurs revus : relais.ts (une reprise n'est ni commencee ni terminee), agent-cockpit.ts et tab/generique.ts (vu_par
   reprise et les trois tables decrits). Points, classement, cloche, emails, quiz, fin de module : rien ne lit vu_le/vu_par
   pour declencher quoi que ce soit (rapport).
-- Verifs : node scripts/verifier-reprise.mjs (15 blocs hors ligne), verifier-academie --hors-ligne (54 blocs),
-  verifier-academie-cockpit-rls (ok), essayer-migration-reprise.mjs (8 etapes, transaction ANNULEE, 3,3 s, rien ne reste,
-  aucune insertion dans academie_lectures), tsc, eslint des fichiers, next build.
+- EFFACEMENT (migration 20261115180000, section 6) : cockpit_effacer et cockpit_effacement_apercu RECREEES depuis leur
+  derniere definition (20261016090000, identique a la base le 15/11), niveau 3, trois cles de plus : academie_reprises,
+  academie_releve_skool, academie_membres_skool (par le compte ou un email des cibles, jamais par le nom), avant la
+  suppression du compte. L'email de Skool rejoint cockpit_oublis_emails ; SQL_IMPORTER_MEMBRES saute les adresses
+  oubliees (l'import ne recree pas une personne effacee). Libelles dans effacement-pur.ts. A SAVOIR : verifier-effacement.mjs
+  et apercu-effacement.mjs lisent encore 20261016090000 (verifier-reprise.mjs controle la nouvelle definition : memes
+  cles, ancien corps intact une fois les ajouts retires) ; verifier-effacement suppose le depot principal (../../sites).
+- Verifs : node scripts/verifier-reprise.mjs (16 blocs hors ligne), verifier-effacement (21 blocs), verifier-lives
+  (25), verifier-academie --hors-ligne (54 blocs), verifier-academie-cockpit-rls (ok), essayer-migration-reprise.mjs
+  (9 etapes dont l'effacement, transaction ANNULEE, rien ne reste, aucune insertion dans academie_lectures), tsc,
+  eslint des fichiers, next build.
 - MISE EN LIGNE, sur go de Brice : (1) essai, puis migration 20261115180000 ; (2) importer-progression-skool.mjs --ecrire ;
   (3) push du journal ; (4) push du site (le bouton ne s'affiche que si /moi rend reprise) ; (5) cockpit, a la main.
   A refaire de temps en temps : le rattachement par email des nouveaux arrives (relancer l'import, rejouable).
-- Pas fait : effacement d'une personne (cockpit_effacer ne connait pas les trois tables) ; rattachement a la main depuis
-  le cockpit (volet 3, le modele le permet : rattache_mode/par/le, academie_reprises mode equipe).
+- Pas fait : rattachement a la main depuis le cockpit (volet 3, le modele le permet : rattache_mode/par/le,
+  academie_reprises mode equipe). Limite de l'effacement : un membre de Skool sans email et jamais rattache ne se
+  retrouve pas (jamais par le nom, par regle).
 
 ## LIVES DU PROGRAMME DE LA SEMAINE, LIEN AVANT CHAQUE LIVE, REPLAY LE LENDEMAIN (15/11/2026, FEATURE, cartes 378 et 379 en A, commite NON pousse, branche academie-lives-programme depuis origin/master a2c18b6 ; migration du workspace 20261115120000 ECRITE NON appliquee)
 

@@ -258,6 +258,10 @@ export const APPS: { app: string; cles: Record<string, Libelle> }[] = [
       quiz_reponses: ['réponse au quiz', 'réponses au quiz'],
       academie_progression: ["leçon suivie à l'académie", "leçons suivies à l'académie"],
       academie_acces: ["accès à l'académie", "accès à l'académie"],
+      // (15/11/2026, migration 20261115180000) La reprise de la progression des membres de Skool.
+      academie_reprises: ['« Déjà vu avant »', '« Déjà vu avant »'],
+      academie_releve_skool: ['cours relevé sur Skool', 'cours relevés sur Skool'],
+      academie_membres_skool: ['fiche du relevé Skool', 'fiches du relevé Skool'],
       aok_objectifs: ['objectif', 'objectifs'],
       aok_progression: ['progression de cours', 'progressions de cours'],
       aok_lecons: ['leçon perso', 'leçons perso'],

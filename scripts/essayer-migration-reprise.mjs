@@ -18,9 +18,15 @@
  *      terminee_le ni marquee_vue_le poses), aok_activite_par_jour qui ne
  *      compte que la lecon vraiment vue (aucun point), l'etat avant decochage ;
  *   5. LECTURES ET ECRITURES REJOUEES sous anon et authenticated (vrai sub) ;
+ *   6. l'EFFACEMENT recree (cockpit_effacement_apercu sur le compte rattache,
+ *      cockpit_effacer de niveau 3 sur une adresse FICTIVE, sans compte ni
+ *      fiche) : les trois tables, les memes cles des deux cotes, l'adresse dans
+ *      la liste d'oubli, l'import suivant qui ne recree pas la personne.
  * Puis la transaction est annulee, et on verifie hors transaction que rien
- * n'est reste. Aucune insertion dans academie_lectures (sa sequence n'est pas
- * transactionnelle). Aucun email ni identifiant complet n'est affiche.
+ * n'est reste (tables, contrainte, corps des deux fonctions, journal des
+ * effacements, liste d'oubli). Aucune insertion dans academie_lectures (sa
+ * sequence n'est pas transactionnelle). Aucun email ni identifiant complet
+ * n'est affiche.
  *
  * Lancement (depuis apps/journal-d-etude ; worktree : AOK_WORKSPACE=<racine du workspace>) :
  *   node --env-file=.env --env-file=.env.local scripts/essayer-migration-reprise.mjs
@@ -73,7 +79,11 @@ const etat = async c => big((await c.$queryRawUnsafe(`select
   to_regclass('public.academie_skool_membres')::text as membres,
   to_regclass('public.academie_progression_skool')::text as releve,
   to_regclass('public.academie_reprises')::text as reprises,
-  (select pg_get_constraintdef(oid) from pg_constraint where conname = 'academie_progression_vu_par_check') as vu_par`))[0])
+  (select pg_get_constraintdef(oid) from pg_constraint where conname = 'academie_progression_vu_par_check') as vu_par,
+  (select md5(prosrc) from pg_proc where oid = 'public.cockpit_effacer(integer,bigint[],uuid[],text[],text[],text)'::regprocedure) as effacer,
+  (select md5(prosrc) from pg_proc where oid = 'public.cockpit_effacement_apercu(integer,bigint[],uuid[],text[],text[])'::regprocedure) as apercu,
+  (select count(*) from public.cockpit_effacements)::int as effacements,
+  (select count(*) from public.cockpit_oublis_emails)::int as oublis`))[0])
 
 const U = 'e55a1000-0000-4000-8000-00000000000a' // compte d'essai invente (aucun compte du site)
 const releve = R.lireReleveSkool(readFileSync(new URL('./fixtures/progression-skool/progression-skool-2026-11-15.csv', import.meta.url), 'utf8'))
@@ -271,6 +281,42 @@ try {
       values ('${U}'::uuid, '${mod.id}'::uuid, 'module', 'membre', '${U}'::uuid, 'module:essai') returning id`)
     assert.equal(ecrire.lu, false)
     ok(`roles : anon refuse (${anon.motif}), un membre ne lit que ce qui est a lui, aucune ecriture navigateur (${ecrire.motif})`)
+
+    // 6. L'effacement (niveau 3) connait les trois tables.
+    // L'apercu (STABLE, rien n'est touche) d'un compte rattache : ses emails restent en base, passes par sous-requete.
+    await tx.$executeRawUnsafe(`insert into public.academie_reprises (user_id, module_id, portee, mode, par, note)
+      values ($1::uuid, $2::uuid, 'module', 'equipe', $1::uuid, 'essai effacement')`, C, mod.id)
+    const [ap] = big(await tx.$queryRawUnsafe(`select public.cockpit_effacement_apercu(3, '{}'::bigint[], '{}'::uuid[],
+        coalesce((select array_agg(lower(u.email)) from auth.users u where u.id = $1::uuid and u.email is not null), '{}'::text[]),
+        '{}'::text[]) as a`, C))
+    assert.equal(ap.a.efface.academie_reprises, 1)
+    assert.equal(ap.a.efface.academie_membres_skool, 1, 'le membre de Skool rattache a la main')
+    assert.equal(ap.a.efface.academie_releve_skool, lignesC.length)
+    // Les cles d'avant sont toujours la.
+    for (const k of ['academie_progression', 'academie_acces', 'skool_miroir', 'aok_comptes', 'journal_notes', 'fiche_membres']) {
+      assert.ok(k in ap.a.efface, k)
+    }
+    // Un vrai cockpit_effacer de niveau 3 sur une adresse FICTIVE (aucun compte, aucune fiche) : son membre de Skool.
+    const tom = membres.find(m => m.statut === 'parti' && m.email)
+    const lignesTom = releve.lignes.filter(l => l.skoolMemberId === tom.skoolMemberId).length
+    const [ef] = big(await tx.$queryRawUnsafe(`select public.cockpit_effacer(3, '{}'::bigint[], '{}'::uuid[], array[$1::text], '{}'::text[], 'essai reprise') as r`, tom.email))
+    assert.equal(ef.r.efface.academie_membres_skool, 1)
+    assert.equal(ef.r.efface.academie_releve_skool, lignesTom)
+    assert.equal(ef.r.efface.academie_reprises, 0)
+    assert.deepEqual(Object.keys(ef.r.efface).sort(), Object.keys(ap.a.efface).sort(), 'memes cles que l apercu')
+    const [reste] = big(await tx.$queryRawUnsafe(`select
+        (select count(*) from public.academie_skool_membres where skool_member_id = $1)::int as membre,
+        (select count(*) from public.academie_progression_skool where skool_member_id = $1)::int as releve,
+        exists (select 1 from public.cockpit_oublis_emails o where o.email_hash = public.cockpit_hash_email($2)) as oublie`,
+      tom.skoolMemberId, tom.email))
+    assert.deepEqual(reste, { membre: 0, releve: 0, oublie: true })
+    // L'import suivant ne le recree pas (adresse dans la liste d'oubli), et ne double rien pour les autres.
+    const apresEffacement = await importer()
+    const [n2] = big(await tx.$queryRawUnsafe(`select (select count(*) from public.academie_skool_membres)::int as m,
+      (select count(*) from public.academie_progression_skool)::int as c`))
+    assert.deepEqual(apresEffacement, { m: 0, c: 0 })
+    assert.deepEqual(n2, { m: membres.length - 1, c: releve.lignes.length - lignesTom })
+    ok(`effacement : l apercu du compte rattache compte ses 3 tables, cockpit_effacer (niveau 3, adresse fictive) efface le membre de Skool et ses ${lignesTom} cours, memes cles que l apercu, l import ne le recree pas`)
 
     throw new Annulation()
   }, { timeout: 60_000, maxWait: 10_000 })

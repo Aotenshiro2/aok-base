@@ -125,6 +125,11 @@ try {
   console.log(`  membres rattachables par adresse  ${liste.filter(m => R.rattachableParEmail(m) && rattachables.has(m.email)).length}`)
   console.log(`    dont avec historique (bouton)   ${hRattachables}`)
   console.log(`  avec historique, pas encore de compte du site a cette adresse  ${avecHistorique.filter(m => R.rattachableParEmail(m) && !rattachables.has(m.email)).length}`)
+  // Les personnes effacees (cockpit_effacer, niveau 3) : leur adresse est dans la liste d'oubli, l'import les saute.
+  const tousEmails = [...new Set(liste.map(m => m.email).filter(Boolean))]
+  const [oublis] = await prisma.$queryRawUnsafe(`select count(*)::int as n from unnest($1::text[]) as e(x)
+    where exists (select 1 from public.cockpit_oublis_emails o where o.email_hash = public.cockpit_hash_email(e.x))`, tousEmails)
+  console.log(`  adresses effacees (sautees)       ${oublis.n}`)
 
   let dejaEnBase = null
   try {
@@ -164,7 +169,7 @@ try {
         }
       }, { timeout: 60_000 })
       console.log('\nECRIT :')
-      console.log(`  membres crees ${bilan.membresCrees}, mis a jour ${bilan.membresMaj}, inchanges ${liste.length - bilan.membresCrees - bilan.membresMaj}`)
+      console.log(`  membres crees ${bilan.membresCrees}, mis a jour ${bilan.membresMaj}, inchanges ou effaces ${liste.length - bilan.membresCrees - bilan.membresMaj}`)
       console.log(`  lignes crees ${bilan.coursCrees}, mises a jour ${bilan.coursMaj}, inchangees ${gardees.length - bilan.coursCrees - bilan.coursMaj}`)
       console.log(`  rattaches par adresse ${bilan.rattaches}`)
     }

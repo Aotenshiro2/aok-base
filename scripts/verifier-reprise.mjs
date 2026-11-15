@@ -317,6 +317,51 @@ bloc('la migration : vu_par reprise, une fois par cours en base, RLS forcee, rie
   for (const l of sql.split('\n')) if (l.trim().startsWith('--')) assert.ok(!l.includes(';'), `commentaire sans point-virgule : ${l.slice(0, 60)}`)
 })
 
+bloc('l effacement d une personne connait les trois tables, sans rien perdre de ce qu il effacait', () => {
+  const nouveau = texteWorkspace(MIGRATION)
+  const ancien = texteWorkspace('sites/Aoknowledgecom/supabase/migrations/20261016090000_cockpit_effacement.sql')
+  const corps = (sql, tag) => {
+    const debut = sql.indexOf(`as $${tag}$`)
+    const fin = sql.indexOf(`$${tag}$`, debut + tag.length + 5)
+    assert.ok(debut > 0 && fin > debut, `corps ${tag}`)
+    return sql.slice(debut + tag.length + 5, fin)
+  }
+  const norm = s => s.split('\n').filter(l => !l.trim().startsWith('--')).join('\n').replace(/\s+/g, ' ').trim()
+  // Les memes cles dans l'apercu et dans l'effacement (meme lecture que verifier-effacement.mjs).
+  const apercu = corps(nouveau, 'apercu')
+  const effacer = corps(nouveau, 'effacer')
+  const cles = t => new Set([...t.matchAll(/'([a-z_]+)', \(select count/g)].map(m => m[1]))
+  const efface = cles(apercu.slice(apercu.indexOf("'efface',"), apercu.indexOf("'anonymise',")))
+  efface.add('aok_journaux_securite')
+  const cotes = p => new Set([...effacer.matchAll(new RegExp(`${p} := ${p} \\|\\| jsonb_build_object\\(([^;]+?)\\);`, 'g'))]
+    .flatMap(m => [...m[1].matchAll(/'([a-z_]+)', /g)].map(x => x[1])))
+  assert.deepEqual([...cotes('v_efface')].sort(), [...efface].sort())
+  const NOUVELLES = ['academie_reprises', 'academie_releve_skool', 'academie_membres_skool']
+  for (const c of NOUVELLES) assert.ok(efface.has(c), c)
+  // Sans rien perdre : les ajouts retires, le corps est celui de 20261016090000 (la derniere definition).
+  const effacerSans = norm(effacer).replace(/delete from public\.academie_reprises [\s\S]*?jsonb_build_object\('academie_membres_skool', v_n\); /, '')
+  assert.equal(effacerSans, norm(corps(ancien, 'effacer')))
+  const apercuSans = norm(apercu).replace(/'academie_reprises', \(select count[\s\S]*?or x\.email = any\(k\.em\)\), /, '')
+  assert.equal(apercuSans, norm(corps(ancien, 'apercu')))
+  // Au niveau 3, avant la suppression du compte (profile_id passerait a null) ; jamais par le nom.
+  const n3 = effacer.indexOf('-- Le pipeline ne recree pas la fiche.')
+  for (const t of ['academie_reprises', 'academie_progression_skool', 'academie_skool_membres']) {
+    const i = effacer.indexOf(`delete from public.${t}`)
+    assert.ok(n3 > 0 && i > n3 && i < effacer.indexOf('delete from public.profiles where id'), t)
+  }
+  assert.ok(!/academie_skool_membres[^;]*(prenom|\bnom\b)/.test(effacer), 'jamais par le nom')
+  // L'email de Skool rejoint la liste d'oubli, et l'import saute les adresses oubliees.
+  assert.match(effacer, /insert into public\.cockpit_oublis_emails \(email_hash\)\s+select public\.cockpit_hash_email\(m\.email\) from public\.academie_skool_membres m/)
+  assert.match(R.SQL_IMPORTER_MEMBRES, /not exists \(select 1 from public\.cockpit_oublis_emails o where o\.email_hash = public\.cockpit_hash_email\(t\.email\)\)/)
+  assert.match(R.SQL_IMPORTER_COURS, /where exists \(select 1 from public\.academie_skool_membres m where m\.skool_member_id = t\.membre\)/)
+  // Droits inchanges, libelles de la carte d'effacement.
+  assert.ok(nouveau.includes('revoke all on function public.cockpit_effacer(integer, bigint[], uuid[], text[], text[], text) from public, anon, authenticated, service_role;'))
+  assert.ok(nouveau.includes('revoke all on function public.cockpit_effacement_apercu(integer, bigint[], uuid[], text[], text[]) from public, anon, authenticated, service_role;'))
+  assert.match(nouveau, /cockpit_effacer\([\s\S]{0,300}language plpgsql\s+volatile\s+security definer/)
+  const libelles = lire('../src/lib/effacement-pur.ts')
+  for (const c of NOUVELLES) assert.match(libelles, new RegExp(`\\b${c}: \\[`), `libelle ${c}`)
+})
+
 bloc('la route : jeton, CORS de l academie, debit, le serveur decide, rien de personnel dans les logs', () => {
   const route = lire('../src/app/api/academie/reprise/route.ts')
   assert.match(route, /compteDuJeton\(req\)/)

@@ -686,6 +686,8 @@ update public.academie_reprises set lecons = $2::uuid[] where id = $1::uuid
  * releve. Rejouable : une ligne inchangee n'est pas reecrite. Un rattachement
  * PAR EMAIL tombe si l'adresse change ou devient ambigue ; un rattachement a
  * la main (equipe, membre) reste. Rend { cree } par ligne ecrite.
+ * Une adresse effacee (cockpit_oublis_emails : effacement de niveau 3 par
+ * cockpit_effacer) est sautee : l'import ne recree pas une personne effacee.
  */
 export const SQL_IMPORTER_MEMBRES = `
 insert into public.academie_skool_membres as m
@@ -693,6 +695,8 @@ insert into public.academie_skool_membres as m
 select t.id, t.prenom, t.nom, t.email, t.source, t.statut, t.rejoint::date, $8::date
   from unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[])
        as t(id, prenom, nom, email, source, statut, rejoint)
+ where t.email is null
+    or not exists (select 1 from public.cockpit_oublis_emails o where o.email_hash = public.cockpit_hash_email(t.email))
 on conflict (skool_member_id) do update set
   prenom = excluded.prenom,
   nom = excluded.nom,
@@ -721,6 +725,8 @@ returning (xmax = 0) as cree
  * Le releve par cours : $1 membres, $2 cours, $3 titres, $4 lecons
  * terminees, $5 lecons du cours, $6 pourcentages, $7 acces (bool ou null),
  * $8 date du releve. Rejouable (cle membre, cours, date). Rend { cree }.
+ * Seulement pour un membre de Skool present : un membre efface (saute par
+ * SQL_IMPORTER_MEMBRES) ne recoit pas son releve.
  */
 export const SQL_IMPORTER_COURS = `
 insert into public.academie_progression_skool as p
@@ -728,6 +734,7 @@ insert into public.academie_progression_skool as p
 select t.membre, t.cours, t.titre, t.terminees, t.total, t.pc, t.acces, $8::date
   from unnest($1::text[], $2::text[], $3::text[], $4::int[], $5::int[], $6::smallint[], $7::boolean[])
        as t(membre, cours, titre, terminees, total, pc, acces)
+ where exists (select 1 from public.academie_skool_membres m where m.skool_member_id = t.membre)
 on conflict (skool_member_id, skool_cours_id, releve_le) do update set
   skool_cours_titre = excluded.skool_cours_titre,
   lecons_terminees = excluded.lecons_terminees,
