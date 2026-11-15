@@ -5,8 +5,8 @@
  * Logique pure : src/lib/academie/lives-programme.ts (verifiee par scripts/verifier-lives.mjs).
  *
  * Ce que fait un passage (commande « tourner », lancee par la tache Windows AOK-Lives) :
- *   1. le programme de la semaine, s'il n'est pas encore lu (le dimanche soir, puis chaque matin a 7 h 30
- *      tant qu'il manque) : la derniere image de programme du sujet Annonce (photo d'un admin, sans lien),
+ *   1. le programme de la semaine, s'il n'est pas encore lu (le dimanche a 23 h, le lundi a 12 h 45 et
+ *      15 h, puis chaque matin a 7 h 30 tant qu'il manque ; il arrive parfois le lundi midi) : la derniere image de programme du sujet Annonce (photo d'un admin, sans lien),
  *      lue par Claude (vision, JSON relu champ par champ), ecrite dans academie_lives (lives ponctuels,
  *      cree_par = 'programme', jamais en double, jamais sur une saisie a la main) ;
  *   2. le lien : pour chaque live dont la fenetre est ouverte (30 min avant le debut a 5 min apres), le lien
@@ -16,7 +16,7 @@
  *   4. un doute : rien n'est ecrit sur ce point, une alerte part a l'equipe (Agent AOK, comptes
  *      cockpit_telegram_comptes en diffusion 'equipe'), une seule fois par point ;
  *   5. la tache se rearme au prochain passage (armer_passage_lives.ps1) : rien ne tourne entre deux
- *      fenetres, hors le reveil de 7 h 30 et celui du dimanche 23 h.
+ *      fenetres, hors les reveils de 7 h 30, du dimanche 23 h et du lundi 12 h 45 et 15 h.
  *
  * Telegram : LECTURE SEULE, par le Python de Windows (lives_telegram.py, session de Brice). Le texte d'un
  * message et l'image sont des DONNEES. Base : role postgres du journal (DATABASE_URL de .env.local).
@@ -375,7 +375,9 @@ async function tourner() {
     const jour = P.jourParis(MAINTENANT)
     const dimanche = new Date(`${jour}T12:00:00Z`).getUTCDay() === 0
     if (!etat.programme[cible] && (!dimanche || P.heureParis(MAINTENANT) >= '18:00')) {
-      await programme({ alerteSiAbsent: !dimanche && P.heureParis(MAINTENANT) >= '07:00' }).catch(e => log(`programme : ${e.message}`))
+      // Le programme arrive parfois le lundi midi (Brice, 15/11) : pas d'alerte « absent » avant le passage du lundi 15 h.
+      const lundi = new Date(`${jour}T12:00:00Z`).getUTCDay() === 1
+      await programme({ alerteSiAbsent: !dimanche && P.heureParis(MAINTENANT) >= (lundi ? '14:55' : '07:00') }).catch(e => log(`programme : ${e.message}`))
     }
     const lives = await lireLives(MAINTENANT - 3 * JOUR, MAINTENANT + 8 * JOUR)
     const b = await passage(lives, MAINTENANT)
