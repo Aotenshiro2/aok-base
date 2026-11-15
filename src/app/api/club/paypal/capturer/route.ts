@@ -5,8 +5,8 @@ import {
   lireCommandePayPal, offreEnBase, poserAccesClub, reservationCoaching,
 } from '@/lib/academie/club-paypal'
 import {
-  OFFRES_PAYPAL, estIdPayPal, etatCapture, lireCommande, modeleEmailCoaching, montantConforme, noteAcces, texteAlerteCoaching,
-  texteAlerteEnAttente, texteAlerteNonNote, type CommandeLue,
+  OFFRES_PAYPAL, estIdPayPal, etatCapture, lienModulePayPal, lireCommande, modeleEmailCoaching, modeleEmailModule, montantConforme,
+  noteAcces, texteAlerteCoaching, texteAlerteEnAttente, texteAlerteNonNote, type CommandeLue,
 } from '@/lib/academie/club-paypal-pur'
 import { emailConfirme } from '@/lib/academie/achat'
 import { roleAcademie } from '@/lib/academie/droits'
@@ -39,6 +39,11 @@ import { formaterEuros, prenomDe } from '@/lib/mails-achat-pur'
  * « Brice vous contacte sous 48 h ») et l'equipe recoit une alerte Telegram,
  * qui dit si l'acheteur a bien un achat du 10% Club. etat 'ouvert' veut alors
  * dire « paye et note ».
+ *
+ * 14/11/2026, un module vendu seul (Smart Money Technique, reference_id
+ * module-smt) : l'acces est pose sur son offre (module-la-formation-complete,
+ * qui ouvre le module), renonciation = create_time de la commande (la case est
+ * exigee avant), puis l'email d'un achat de module (modeleEmailModule).
  *
  * Corps : { order_id }, Bearer facultatif (seulement pour compte_lie).
  * 200 { ok, etat: 'ouvert', email, compte_lie, offre } | { ok, etat: 'en_attente', offre }
@@ -202,6 +207,20 @@ export async function POST(req: NextRequest) {
       if (!envoi.ok) console.warn(`[club/paypal/capturer] email d'acces NON envoye commande=${c.orderId} : ${envoi.erreur}`)
     } else {
       console.warn(`[club/paypal/capturer] acces pose sans email confirme (compte=${userId ? tronquer(userId) : '?'}) : pas d'email d'acces`)
+    }
+  }
+
+  // Un module vendu seul (Smart Money Technique) : l'acces est pose, l'email d'un achat de module part.
+  if (r.cree && offre.module) {
+    console.info(`[club/paypal/capturer] module ouvert offre=${offre.cle} commande=${c.orderId} compte=${userId ? tronquer(userId) : 'email'} ${montantEur} EUR${c.essai ? ' essai' : ''}`)
+    if (email) {
+      const envoi = await envoyerEmailModele(email, modeleEmailModule({
+        email, essai: c.essai, montant: formaterEuros(centimesPayes), prenom: prenomDe(c.payeurPrenom),
+        titre: offre.module.titre, lien: lienModulePayPal(offre.module.slug),
+      }))
+      if (!envoi.ok) console.warn(`[club/paypal/capturer] email du module NON envoye commande=${c.orderId} : ${envoi.erreur}`)
+    } else {
+      console.warn(`[club/paypal/capturer] module ouvert sans email confirme (compte=${userId ? tronquer(userId) : '?'}) : pas d'email`)
     }
   }
 

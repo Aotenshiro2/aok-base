@@ -16,14 +16,20 @@ import { messageErreur } from '@/lib/liveclub/pur'
  * de case de renonciation (il se livre en seances, plus tard) et ne se vend
  * que si son offre est en base (migration 20261108235500), essai compris.
  *
- * Corps : { offre?, email?, renonciation: true (Club seulement), essai?: true }.
+ * 14/11/2026 : un module vendu seul, { offre: 'smt' } (Smart Money Technique,
+ * offre module-la-formation-complete). Case de renonciation exigee (contenu
+ * ouvert tout de suite), prix lu en base seulement (aucun defaut), vente
+ * publique par SMT_PAYPAL_PUBLIC=1, fermee par defaut.
+ *
+ * Corps : { offre?, email?, renonciation: true (Club et module), essai?: true }.
  * Bearer facultatif : connecte, le compte part en custom_id (u:<uuid>, lu dans
  * le jeton, jamais dans le corps) et l'email du corps est ignore ; sinon
  * custom_id = e:<email> (sur /merci, l'email de l'achat du Club).
  * Le montant n'est jamais lu dans le corps : 1 EUR en essai, sinon le prix de
- * l'offre en base (1 999 a defaut pour le Club, aucun defaut pour le coaching).
- * Tant que la vente publique de l'offre est fermee (CLUB_PAYPAL_PUBLIC ou
- * COACHING_PAYPAL_PUBLIC differente de 1), seule une demande essai d'un
+ * l'offre en base (1 999 a defaut pour le Club, aucun defaut pour le coaching
+ * ni le module). Tant que la vente publique de l'offre est fermee
+ * (CLUB_PAYPAL_PUBLIC, COACHING_PAYPAL_PUBLIC ou SMT_PAYPAL_PUBLIC differente
+ * de 1), seule une demande essai d'un
  * compte admin (profiles.role, estAdmin) passe. Ouverte, l'essai reste admin.
  *
  * 200 { ok, order_id, offre }

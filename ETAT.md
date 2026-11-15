@@ -1,5 +1,25 @@
 # ETAT du journal d etudes
 
+## SMART MONEY TECHNIQUE PAYABLE PAR PAYPAL (4x) SUR SA PAGE, A COTE DE LA CARTE (14/11/2026, go de Brice, commite NON pousse, branche paypal-smt depuis origin/master 1767fae ; aucune migration)
+
+- Le tunnel PayPal du 10% Club vend une 3e offre : OFFRES_PAYPAL.smt (club-paypal-pur.ts), offre academie
+  module-la-formation-complete (deja en base : 1 500 EUR, type module, ouvre le module la-formation-complete). Une offre
+  de module porte `module` { slug, titre public } : c'est elle qui choisit l'email a la capture.
+- Commande ({ offre: 'smt' }) : case de renonciation exigee, prix lu en base SEULEMENT (prixDefautEur null : offre absente
+  = 503 'config', essai compris), reference_id module-smt / module-smt-essai, description « Module Smart Money Technique -
+  AO Knowledge », PayPal-Request-Id smt-capture-<commande>. Vente fermee tant que SMT_PAYPAL_PUBLIC != 1 (seul l'essai
+  admin a 1 EUR passe, mecanisme commun aux trois offres ; Brice ne fait PAS d'essai a 1 EUR pour celle-ci, 14/11).
+- Capture : academie_acces sur l'offre du module (source paypal, a vie, cote brice, renonciation = create_time de la
+  commande), puis modeleEmailModule (texte du mail d'un module par carte, avec le 4x et le recu PayPal, nom public
+  « Smart Money Technique », lien aoknowledge.com/academie/la-formation-complete). Pas d'alerte Telegram a la vente.
+- GET /api/club/paypal?offre=smt rend { ouvert, offre: 'smt' } : le site n'affiche les boutons que si ouvert (ou ?achat=essai).
+- Verifs : `node scripts/verifier-module-paypal.mjs` (12 blocs), club (15) et coaching (12) inchanges, tsc, eslint, next
+  build. verifier-mails-achat.mjs echouait deja sur origin/master (texte du Club perime face au fichier source), non touche.
+- MISE EN LIGNE : push du journal, puis du site (branche paypal-smt du workspace), puis SMT_PAYPAL_PUBLIC=1 sur Vercel
+  (journal) et redeploiement. Les parties 1 et 2 vendues seules : une ligne de plus dans OFFRES_PAYPAL (et son drapeau
+  dans ventePublique) par partie ; cote site, MODULES_PAYPAL associe un module a une offre, une partie (section du meme
+  module) demandera d'y ajouter la section et l'endroit ou la proposer (non fait).
+
 ## CONNEXION PAR ADRESSE : /api/connexion/adresse ET /api/connexion/envoi POUR LA PAGE DE CONNEXION DU SITE (14/11/2026 soir, FEATURE, go de Brice, commite NON pousse, branche connexion-adresse depuis origin/master 7b5ca76 ; migration 20261114200000 du workspace appliquee par l orchestre, annonce non verifie ici)
 
 - Brief : D:\7_Agents\briefs\2026-11-14-connexion-reconnait-adresse.md et les complements de l'orchestre (envoi par Resend, puis

@@ -16,7 +16,8 @@
 // - cleIdempotence : la reference unique de l'acces et l'en-tete PayPal-Request-Id ;
 // - noteAcces, modeleEmailClub, htmlEmailClub, texteEmailClub : la trace et l'email ;
 // - offrePayPal, offreDeReference, prixCommande, titulaireDe : quelle offre, quel prix, a qui ;
-// - modeleEmailCoaching, texteAlerteCoaching, texteAlerteNonNote : le coaching de 8 h.
+// - modeleEmailCoaching, texteAlerteCoaching, texteAlerteNonNote : le coaching de 8 h ;
+// - modeleEmailModule, lienModulePayPal : un module de l'academie (Smart Money Technique).
 //
 // 08/11/2026 : la meme mecanique vend aussi le coaching de 8 h propose sur
 // /merci, juste apres l'achat du Club (PLAN-UPSELL.md, section 7, decide par
@@ -25,12 +26,23 @@
 // defaut, case de renonciation), la page dit quelle offre elle vend
 // (offrePayPal), et la capture relit l'offre dans la commande PayPal
 // (offreDeReference), jamais dans le corps de la requete.
+//
+// 14/11/2026 (go de Brice) : un module de l'academie se vend aussi par ce
+// tunnel, a cote du bouton carte (Stripe) de sa page. Premier module :
+// Smart Money Technique (module la-formation-complete, offre
+// module-la-formation-complete, 1 500 EUR en base). Une offre de module porte
+// `module` (le module ouvert, son nom public) : la capture pose l'acces sur
+// l'offre, puis l'email d'un achat de module (modeleEmailModule). Les parties
+// 1 et 2 s'ajouteront de la meme facon, une ligne dans OFFRES_PAYPAL chacune.
 
 /** L'offre que vend /club : la formation complete (17 modules, Masterclass a part). */
 export const OFFRE_CLUB = 'formation-complete'
 
 /** L'offre du coaching de 8 h (academie_offres.slug, migration 20261108235500). */
 export const OFFRE_COACHING = 'coaching-8h'
+
+/** L'offre du module Smart Money Technique vendu seul (academie_offres.slug, deja en base le 14/11). */
+export const OFFRE_SMT = 'module-la-formation-complete'
 
 /** Le prix public si la base n'en donne pas (academie_offres.prix_eur). */
 export const PRIX_CLUB_DEFAUT_EUR = 1999
@@ -48,7 +60,10 @@ export const DESCRIPTION_COMMANDE = '10% Club - formation complète AO Knowledge
 // Les offres vendues par ce tunnel PayPal
 // ---------------------------------------------------------------------------
 
-export type CleOffre = 'club' | 'coaching'
+export type CleOffre = 'club' | 'coaching' | 'smt'
+
+/** Le module qu'ouvre une offre de module : son slug (l'adresse) et son nom public (l'email). */
+export type ModulePayPal = { slug: string; titre: string }
 
 export type OffrePayPal = {
   cle: CleOffre
@@ -72,6 +87,12 @@ export type OffrePayPal = {
    * reste entier.
    */
   renonciation: boolean
+  /**
+   * Une offre de module (14/11/2026) : le module ouvert par l'achat. La
+   * capture envoie alors l'email d'un achat de module (modeleEmailModule),
+   * pas celui du 10% Club. Absent : le Club ou le coaching.
+   */
+  module?: ModulePayPal
 }
 
 export const OFFRES_PAYPAL: Record<CleOffre, OffrePayPal> = {
@@ -97,16 +118,32 @@ export const OFFRES_PAYPAL: Record<CleOffre, OffrePayPal> = {
     prefixeCapture: 'coaching8h-capture-',
     renonciation: false,
   },
+  // Smart Money Technique vendu seul (14/11/2026). Prix lu en base SEULEMENT
+  // (aucun defaut) ; le nom public est celui-ci, la base titre encore le
+  // module « La Formation complete ».
+  smt: {
+    cle: 'smt',
+    slug: OFFRE_SMT,
+    nom: 'Smart Money Technique',
+    prixDefautEur: null,
+    reference: 'module-smt',
+    referenceEssai: 'module-smt-essai',
+    description: 'Module Smart Money Technique - AO Knowledge',
+    prefixeCapture: 'smt-capture-',
+    renonciation: true,
+    module: { slug: 'la-formation-complete', titre: 'Smart Money Technique' },
+  },
 }
 
 /**
  * L'offre demandee par la page : absente = le 10% Club (les pages d'avant le
- * 08/11 n'envoient rien), 'club' ou 'coaching', sinon null (la route rend 400).
+ * 08/11 n'envoient rien), sinon une cle de OFFRES_PAYPAL ('club', 'coaching',
+ * 'smt'), sinon null (la route rend 400).
  */
 export function offrePayPal(v: unknown): OffrePayPal | null {
-  if (v === undefined || v === null || v === 'club') return OFFRES_PAYPAL.club
-  if (v === 'coaching') return OFFRES_PAYPAL.coaching
-  return null
+  if (v === undefined || v === null) return OFFRES_PAYPAL.club
+  if (typeof v !== 'string' || !Object.prototype.hasOwnProperty.call(OFFRES_PAYPAL, v)) return null
+  return OFFRES_PAYPAL[v as CleOffre]
 }
 
 /** L'offre et le mode essai portes par un reference_id relu chez PayPal, ou null (pas une commande de ce tunnel). */
@@ -477,6 +514,42 @@ ${bouton}<p style="margin:32px 0 0;line-height:1.5">${SIGNATURE_CLUB.map(echappe
 export function texteEmailClub(m: ModeleEmailClub): string {
   const paragraphes = m.paragraphes.map(p => p.replace(LIEN, (_t, url: string) => url))
   return [...paragraphes, ...(m.bouton ? [`${m.bouton.texte} : ${m.bouton.url}`] : []), SIGNATURE_CLUB.join('\n')].join('\n\n')
+}
+
+// ---------------------------------------------------------------------------
+// Un module de l'academie vendu par PayPal (14/11/2026) : l'email d'acces
+// ---------------------------------------------------------------------------
+
+/** L'adresse d'un module (meme forme que lienDuModule, mails-achat-pur.ts). */
+export const lienModulePayPal = (slug: string) => `${URL_ACADEMIE}/${encodeURIComponent(slug)}`
+
+/**
+ * L'email d'un module achete par PayPal : le texte valide du mail d'un module
+ * achete par carte (modeleModule, mails-achat-pur.ts, brief F1), avec ce qui
+ * change chez PayPal : le 4x gere par PayPal, le recu qui vient de PayPal
+ * (pas de Mon espace, rubrique Achats), et le rappel des Comptes lies du
+ * mail du Club. Meme gabarit, meme expediteur et meme signature que le mail
+ * du Club. titre : le nom public du module ; lien : son adresse (https).
+ */
+export function modeleEmailModule(p: {
+  email: string; essai: boolean; montant?: string | null; prenom?: string | null; titre: string; lien: string
+}): ModeleEmailClub {
+  const leModule = `le module « ${p.titre} »`
+  const paiement = p.montant
+    ? `Merci, votre paiement est bien passé : ${p.montant} pour ${leModule}.`
+    : `Merci, votre paiement est bien passé pour ${leModule}.`
+  return {
+    sujet: `${p.essai ? '[Essai] ' : ''}Le module ${p.titre} est ouvert`,
+    paragraphes: [
+      p.prenom ? `Bonjour ${p.prenom},` : 'Bonjour,',
+      `${paiement} Il est ouvert sur votre compte AOKnowledge, à vie. Si vous payez en 4 fois, les échéances sont gérées par PayPal, pas par nous.`,
+      `Pour y entrer : {lien:${p.lien}|${p.lien.replace(/^https:\/\//, '')}}, avec ${p.email}, l'adresse de votre achat. C'est elle qui ouvre l'accès. Pas encore de compte ? Il se crée à votre première connexion, avec cette adresse. Une autre adresse vous convient mieux ? Une fois connecté, ajoutez-la dans Mon espace, Comptes liés : {lien:${URL_COMPTES_LIES}|aoknowledge.com/mon-espace/parametres/comptes}`,
+      'Pour commencer, lancez la première leçon. Votre progression se garde toute seule, et le module reste dans « Mes cours » sur aoknowledge.com/mon-espace, avec un bouton « Continuer » pour reprendre où vous vous êtes arrêté.',
+      `Vous avez demandé l'accès immédiat en payant, ce qui vaut renonciation à votre droit de rétractation (nos conditions : {lien:${URL_CONDITIONS}|aoknowledge.com/conditions-generales}). Votre reçu, lui, vient de PayPal.`,
+      'Une question, un souci ? Répondez à cet email, ou écrivez à support@aoknowledge.com : ça arrive chez nous dans les deux cas.',
+    ],
+    bouton: { texte: 'Ouvrir le module', url: p.lien },
+  }
 }
 
 // ---------------------------------------------------------------------------
