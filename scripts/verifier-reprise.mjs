@@ -75,6 +75,22 @@ bloc('sans historique : pas de bouton, et le serveur refuse', () => {
   assert.equal(vide.get('c'.repeat(32)).historique, false)
 })
 
+bloc('historique : seulement les cours qui ont un equivalent dans l academie (Brice, 15/11, reco A)', () => {
+  const INITIATION = '24f3805eb884446b95190f1289fdf382'
+  const LIVECLUB = '2fa73af4e8dc4bc089b95fb55510f7bc'
+  assert.equal(R.COURS_SKOOL_HISTORIQUE.has(INITIATION), false)
+  assert.equal(R.COURS_SKOOL_HISTORIQUE.has(LIVECLUB), true)
+  const m = R.membresDuReleve([
+    { skoolMemberId: 'e'.repeat(32), coursId: INITIATION, terminees: 8, total: 8, email: null, emailSource: 'aucune', prenom: null, nom: null, statut: null, rejoint: null },
+    { skoolMemberId: 'f'.repeat(32), coursId: INITIATION, terminees: 8, total: 8, email: null, emailSource: 'aucune', prenom: null, nom: null, statut: null, rejoint: null },
+    { skoolMemberId: 'f'.repeat(32), coursId: LIVECLUB, terminees: 1, total: 4, email: null, emailSource: 'aucune', prenom: null, nom: null, statut: null, rejoint: null },
+  ])
+  assert.equal(m.get('e'.repeat(32)).historique, false, 'Initiation Skool seule : pas d historique')
+  assert.equal(m.get('f'.repeat(32)).historique, true, 'un cours avec equivalent : historique')
+  assert.match(R.SQL_FAITS_REPRISE, /ps\.skool_cours_id in \('[0-9a-f]{32}'/)
+  assert.ok(!R.SQL_FAITS_REPRISE.includes(INITIATION), 'la base ne compte pas Initiation Skool')
+})
+
 bloc('la fenetre : 30 jours apres l arrivee, jamais avant le 16/11, refus apres', () => {
   const f = R.fenetreReprise(new Date('2026-11-17T09:00:00Z'), MAINTENANT)
   assert.equal(f.fin.toISOString(), '2026-12-17T09:00:00.000Z')

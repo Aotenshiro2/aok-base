@@ -533,6 +533,20 @@ export function lireCoursSkool(texte: string): Map<string, { titre: string; leco
   return sortie
 }
 
+/**
+ * Les cours de Skool qui font un historique : seulement ceux qui ont un
+ * equivalent dans l'academie (module non vide, sur ou douteux). Brice, 15/11,
+ * carte academie-reprise-mise-en-ligne en A : un membre qui n'a fini que
+ * « Initiation Skool » (le mode d'emploi de Skool) n'a rien vu de nos cours.
+ */
+export const COURS_SKOOL_HISTORIQUE: ReadonlySet<string> = new Set(
+  CORRESPONDANCE_SKOOL.filter(c => c.module !== null).map(c => c.skool),
+)
+for (const id of COURS_SKOOL_HISTORIQUE) {
+  if (!/^[0-9a-f]{32}$/.test(id)) throw new Error(`id de cours Skool invalide dans CORRESPONDANCE_SKOOL : ${id}`)
+}
+const LISTE_SQL_COURS_HISTORIQUE = [...COURS_SKOOL_HISTORIQUE].map(id => `'${id}'`).join(', ')
+
 export type MembreReleve = {
   skoolMemberId: string
   prenom: string | null
@@ -541,7 +555,7 @@ export type MembreReleve = {
   emailSource: SourceEmail
   statut: 'actif' | 'parti' | null
   rejoint: string | null
-  /** Au moins une lecon terminee dans un cours non vide : l'historique de la regle. */
+  /** Au moins une lecon terminee dans un cours qui a son equivalent (COURS_SKOOL_HISTORIQUE) : l'historique de la regle. */
   historique: boolean
   /** Les lignes du membre ne disent pas toutes la meme chose (adresse, nom) : la premiere est gardee. */
   incoherent: boolean
@@ -552,7 +566,7 @@ export function membresDuReleve(lignes: readonly LigneReleve[], coursVides: Read
   const sortie = new Map<string, MembreReleve>()
   for (const l of lignes) {
     const deja = sortie.get(l.skoolMemberId)
-    const compte = !coursVides.has(l.coursId) && l.terminees > 0
+    const compte = !coursVides.has(l.coursId) && l.terminees > 0 && COURS_SKOOL_HISTORIQUE.has(l.coursId)
     if (!deja) {
       sortie.set(l.skoolMemberId, {
         skoolMemberId: l.skoolMemberId, prenom: l.prenom, nom: l.nom, email: l.email, emailSource: l.emailSource,
@@ -611,6 +625,7 @@ select
     select 1 from public.academie_progression_skool ps
      where ps.skool_member_id in (select skool_member_id from membres)
        and ps.lecons_terminees > 0 and ps.lecons_total > 0
+       and ps.skool_cours_id in (${LISTE_SQL_COURS_HISTORIQUE})
   ) as releve_skool,
   exists (
     select 1 from public.aok_anciens_membres am

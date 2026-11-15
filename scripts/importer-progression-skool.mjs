@@ -91,7 +91,7 @@ if (lu.erreurs.length) {
 }
 console.log(`  adresses illisibles         ${lu.emailsIllisibles} (gardees sans adresse)`)
 console.log(`  membres                     ${liste.length}`)
-console.log(`  avec historique             ${avecHistorique.length} (au moins une lecon terminee)`)
+console.log(`  avec historique             ${avecHistorique.length} (au moins une lecon terminee dans un cours qui a son equivalent)`)
 console.log(`    avec une adresse          ${avecHistorique.filter(R.rattachableParEmail).length}`)
 console.log(`    sans adresse              ${avecHistorique.filter(m => m.email === null).length} (rattachement a la main seulement)`)
 console.log(`    adresse ambigue           ${avecHistorique.filter(m => m.emailSource === R.SOURCE_AMBIGUE).length} (jamais rattachee automatiquement)`)
