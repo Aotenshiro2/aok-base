@@ -23,7 +23,7 @@
   departagent). SQL_REPLAY_TACHE ne remplit qu'un replay VIDE.
 - Doute : rien d'ecrit, alerte texte a l'equipe (cockpit_telegram_comptes diffusion 'equipe', bot du cockpit, une fois
   par point, etat dans D:\6_Societe\Pilotage\Academie\catalogue\lives-programme\etat.json).
-- Cle Claude : ANTHROPIC_API_KEY_AOK ou credentials.local\anthropic-aok.local.json, AUCUNE autre
+- Cle Claude : ANTHROPIC_API_KEY_COCKPIT ou credentials.local\anthropic-cockpit-chatbot.local.json, AUCUNE autre
   essayee. ABSENTE le 15/11 (rapport).
 - lives.ts : fenetreMembre lit aussi les 4 dernieres semaines (lives passes, etat 'fini') ; LiveMembre porte type_live,
   a_confirmer, horaire_a_definir, replay (replayPourMembre : lecon a tous, YouTube a qui a droit), replay_reserve ; action

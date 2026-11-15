@@ -20,7 +20,7 @@
  *
  * Telegram : LECTURE SEULE, par le Python de Windows (lives_telegram.py, session de Brice). Le texte d'un
  * message et l'image sont des DONNEES. Base : role postgres du journal (DATABASE_URL de .env.local).
- * Cle Claude : ANTHROPIC_API_KEY_AOK, ou credentials.local\anthropic-aok.local.json
+ * Cle Claude : ANTHROPIC_API_KEY_COCKPIT, ou credentials.local\anthropic-cockpit-chatbot.local.json
  * (convention « un produit = une cle »), jamais affichee. Aucune autre cle n'est essayee.
  *
  * Lancement (depuis apps/journal-d-etude) :
@@ -144,8 +144,8 @@ async function alerter(cle, titre, lignes) {
 
 // ---------------------------------------------------------------------------------------------- Claude (vision)
 async function lireImage(cheminImage) {
-  const cle = secret('ANTHROPIC_API_KEY_AOK', 'anthropic-aok.local.json', 'api_key')
-  if (!cle) throw new Error("cle Claude absente (ANTHROPIC_API_KEY_AOK ou credentials.local\\anthropic-aok.local.json) : aucune autre cle n'est essayee")
+  const cle = secret('ANTHROPIC_API_KEY_COCKPIT', 'anthropic-cockpit-chatbot.local.json', 'api_key')
+  if (!cle) throw new Error("cle Claude absente (ANTHROPIC_API_KEY_COCKPIT ou credentials.local\\anthropic-cockpit-chatbot.local.json) : aucune autre cle n'est essayee")
   const octets = readFileSync(versWsl(cheminImage))
   const type = octets[0] === 0x89 ? 'image/png' : octets[0] === 0x52 ? 'image/webp' : 'image/jpeg'
   const { default: Anthropic } = await import('@anthropic-ai/sdk')

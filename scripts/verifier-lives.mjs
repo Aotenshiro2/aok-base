@@ -602,7 +602,7 @@ bloc('la migration du 15/11 : colonnes, cle unique, fonction recreee et fermee, 
 bloc('la tache : lecture seule de Telegram, aucune ecriture en simulation, aucune autre cle, aucune minuterie', () => {
   const s = lire('./lives-programme.mjs')
   assert.match(s, /if \(SIM\) throw new Error\('ecriture demandee en simulation/)
-  assert.match(s, /ANTHROPIC_API_KEY_AOK/)
+  assert.match(s, /ANTHROPIC_API_KEY_COCKPIT/)
   assert.doesNotMatch(s, /ANTHROPIC_API_KEY_(CARNET|SUPPORT|LIVECLUB)|process\.env\.ANTHROPIC_API_KEY\b/)
   assert.doesNotMatch(s, /setInterval/)
   assert.doesNotMatch(s, /log\([^)]*\$\{[a-z.]*\.(lien|replay)\}/, 'un lien de live n est jamais ecrit tel quel dans le journal')
