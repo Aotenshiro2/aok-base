@@ -21,12 +21,23 @@
   meme domaine), https://masterclass.aoknowledge.com, https://pilotage.aoknowledge.com (lien -> <origine>/auth/lien : chaque
   produit doit avoir cette page), chrome-extension://phajegonlmgnjkkfdooedoddnmgpheic (Store) et
   chrome-extension://klggbgjkojkcblgodajdjhhineocchbe (version locale, cle du manifest). Pas de voie « code seul »
-  (consigne de l'Orchestre) : un lien chrome-extension:// ne s'ouvre pas depuis un email ; l'extension peut passer
-  origine = https://journal.aoknowledge.com pour un lien qui marche. journal-d-etude-beta.vercel.app n'est PAS sur la
-  liste : sur cette adresse, la page retombe sur signInWithOtp.
-- Verifs : node scripts/verifier-connexion-adresse.mjs (13 blocs), node scripts/verifier-connexion-page.mjs (10), tsc,
-  eslint, next build ; scripts verifier-connexion-* du site (origin/master exporte, 10 + 8) et controle croise du contrat.
-- MISE EN LIGNE : ce journal AVANT les autres produits (masterclass, Pilotage, Carnet).
+  (consigne de l'Orchestre). Une valeur de ORIGINES est un chemin (ajoute a l'origine) ou une adresse https:// complete
+  (prise telle quelle, baseDuLien) : les deux origines de l'extension -> https://journal.aoknowledge.com/auth/carnet.
+  journal-d-etude-beta.vercel.app n'est PAS sur la liste : sur cette adresse, la page retombe sur signInWithOtp.
+- /auth/carnet (suite du 16/11, rapport du Carnet D:\7_Agents\briefs\connexion-ecosysteme-carnet-rapport.md, contrat lu
+  dans src/lib/connexion-lien.ts du Carnet au commit 76b98fc) : lit #token_hash=&type= (ou ?code= du repli PKCE), retire
+  le fragment, et passe { type: 'carnet:connexion-lien', token_hash, otpType } (ou { ..., code }) par
+  chrome.runtime.sendMessage au Store phajegon... puis a la version locale klggbgjk... si le Store ne repond pas (ou
+  repond pas-attendu). Elle ne verifie PAS le jeton (le service worker du Carnet le fait, pour SA session) et ne connecte
+  jamais le journal ; aucun client Supabase dans la page, aucun log. Messages : transmis, absente (autre navigateur,
+  telephone), expire, pas-attendu, autre-compte, trop, erreur, lent (20 s sans reponse), invalide. Pur :
+  src/lib/connexion-carnet-pur.ts ; cadre commun des deux pages : src/components/connexion/Cadre.tsx. Demo :
+  ?carnet=ok|absente|expire|... avec NEXT_PUBLIC_CONNEXION_DEMO=1. Facultatif (tableau de bord Supabase, pas du code) :
+  /auth/carnet dans les Redirect URLs pour le repli PKCE du Carnet.
+- Verifs : node scripts/verifier-connexion-adresse.mjs (14 blocs), verifier-connexion-page.mjs (10),
+  verifier-connexion-carnet.mjs (8), tsc, eslint, next build ; scripts verifier-connexion-* du site (origin/master
+  exporte, 10 + 8), controle croise du contrat avec le site (4) et avec la garde du Carnet (3, lecture seule).
+- MISE EN LIGNE : ce journal AVANT les autres produits (masterclass, Pilotage, Carnet 1.10.1).
 
 ## SMART MONEY TECHNIQUE PAR PARTIE : LA PARTIE 1 OU LA PARTIE 2 SEULE, CARTE ET 4x PAYPAL (15/11/2026, go de Brice « 1500 si les deux parties sont prises d'un coup, 850 en separe », commite NON pousse, branche parties-smt rebasee sur origin/master e0cd85f ; aucune migration ; RIEN cree en base ni chez Stripe ou PayPal)
 

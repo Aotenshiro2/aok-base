@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
-  ORIGINES, ORIGINE_DEFAUT, PLANCHER_MS, SUJET, EXPEDITEUR, EXTENSION_CARNET_STORE, EXTENSION_CARNET_LOCALE,
+  ORIGINES, ORIGINE_DEFAUT, PLANCHER_MS, SUJET, EXPEDITEUR, EXTENSION_CARNET_STORE, EXTENSION_CARNET_LOCALE, PAGE_LIEN_CARNET,
   baseDuLien, cheminRetourSur, enTetesCors, envoyer, hmacAdresse, hmacIp, lireEnvoiSql, lireJetonSupabase,
   lireReconnaissanceSql, modeleEmailConnexion, origineAutorisee, plancher, reconnaitre, urlDuLien,
 } from '../src/lib/connexion-adresse-pur.ts'
@@ -81,9 +81,23 @@ await bloc('origine du lien : celle demandee si autorisee, sinon celle de la req
     assert.equal(baseDuLien('https://evil.example', o), `${o}/auth/lien`)
   }
   assert.equal(baseDuLien('https://pilotage.aoknowledge.com', 'https://masterclass.aoknowledge.com'), 'https://pilotage.aoknowledge.com/auth/lien')
-  // L'extension : son lien a elle (chrome-extension://) ne s'ouvre pas depuis un email ; en passant
-  // origine = une page web de la liste, le lien revient sur cette page (contrat inchange).
-  for (const o of CARNET) assert.equal(baseDuLien('https://journal.aoknowledge.com', o), 'https://journal.aoknowledge.com/auth/lien')
+  // L'extension : un lien chrome-extension:// ne s'ouvre pas depuis un email ; son lien revient sur la
+  // page du journal qui passe le jeton au Carnet (adresse complete, prise telle quelle).
+  assert.equal(PAGE_LIEN_CARNET, 'https://journal.aoknowledge.com/auth/carnet')
+  for (const o of CARNET) {
+    assert.equal(ORIGINES[o], PAGE_LIEN_CARNET)
+    assert.equal(baseDuLien(o, o), PAGE_LIEN_CARNET)
+    assert.equal(baseDuLien(undefined, o), PAGE_LIEN_CARNET)
+    assert.equal(baseDuLien('https://evil.example', o), PAGE_LIEN_CARNET)
+    assert.ok(!baseDuLien(o, o).startsWith('chrome-extension:'), 'jamais un lien chrome-extension:// dans un email')
+    assert.equal(baseDuLien('https://journal.aoknowledge.com', o), 'https://journal.aoknowledge.com/auth/lien', 'une page web demandee explicitement')
+  }
+  assert.equal(urlDuLien(PAGE_LIEN_CARNET, null, 'abc_DEF-123', 'magiclink'), 'https://journal.aoknowledge.com/auth/carnet#token_hash=abc_DEF-123&type=magiclink')
+  // Chaque valeur : un chemin interne, ou la page du Carnet ; aucune autre adresse complete.
+  for (const [o, v] of Object.entries(ORIGINES)) {
+    assert.ok((v.startsWith('/') && !v.startsWith('//')) || v === PAGE_LIEN_CARNET, `${o} : ${v}`)
+    if (v === PAGE_LIEN_CARNET) assert.ok(o.startsWith('chrome-extension://'), o)
+  }
   assert.equal(cheminRetourSur('/academie/la-formation'), '/academie/la-formation')
   for (const v of ['//evil.example', 'https://evil.example', '/\\evil', '/a\tb', '', 'x'.repeat(301), 12, null]) assert.equal(cheminRetourSur(v), null, String(v))
   assert.equal(urlDuLien('https://aoknowledge.com/auth/lien', '/academie', 'abc_DEF-123', 'signup'),
@@ -190,6 +204,17 @@ await bloc('envoyer : la base decide, puis generateLink magiclink, puis Resend (
   const sans = monde('ok')
   await envoyer(entree({ creer: false, newsletter: true }), sans.deps)
   assert.equal(sans.liens[0].donnees, null, 'la case ne compte que pour un compte cree')
+})
+
+await bloc('envoyer depuis l extension du Carnet : meme email, le lien revient sur la page /auth/carnet du journal', async () => {
+  const m = monde('ok')
+  assert.deepEqual(await envoyer(entree({ retour: null, base: baseDuLien(CARNET[0], CARNET[0]) }), m.deps), { envoi: 'ok' })
+  assert.deepEqual(m.ordre, ['rpc', 'lien', 'email'])
+  const { mail } = m.emails[0]
+  assert.equal(mail.sujet, SUJET)
+  assert.ok(mail.texte.includes(`https://journal.aoknowledge.com/auth/carnet#token_hash=${'a'.repeat(56)}&type=signup`))
+  assert.ok(!/chrome-extension:/.test(mail.texte + mail.html))
+  m.j.propre()
 })
 
 await bloc('envoyer : un refus de la base n appelle ni generateLink ni Resend (pas de second compte)', async () => {

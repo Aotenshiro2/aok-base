@@ -54,14 +54,20 @@ export const EXTENSION_CARNET_STORE = 'phajegonlmgnjkkfdooedoddnmgpheic'
 export const EXTENSION_CARNET_LOCALE = 'klggbgjkojkcblgodajdjhhineocchbe'
 
 /**
+ * La page de retour du lien de l'email pour l'extension du Carnet : un lien
+ * chrome-extension:// ne s'ouvre pas depuis un email. Cette page du journal
+ * passe le jeton au Carnet (chrome.runtime.sendMessage, externally_connectable),
+ * qui le vérifie lui-même (src/app/auth/carnet/page.tsx).
+ */
+export const PAGE_LIEN_CARNET = 'https://journal.aoknowledge.com/auth/carnet'
+
+/**
  * Les pages qui ont le droit d'appeler les deux routes, et où revient le lien
- * de l'email (le chemin de la page qui vérifie le jeton par verifyOtp({
- * token_hash, type })). Chaque produit a sa page /auth/lien : un produit dont
- * la page porte un autre chemin change sa ligne ici.
- * L'extension du Carnet : un lien chrome-extension:// ne s'ouvre pas depuis un
- * email. Pour un lien utilisable, l'extension passe `origine` = une page web
- * de la liste (par exemple https://journal.aoknowledge.com) ; sinon, seul le
- * code de l'email sert.
+ * de l'email : un CHEMIN ajouté à l'origine (la page qui vérifie le jeton par
+ * verifyOtp({ token_hash, type })), ou une adresse https:// complète prise
+ * telle quelle (l'extension du Carnet, qui n'a pas de page web à elle). Chaque
+ * produit web a sa page /auth/lien : un produit dont la page porte un autre
+ * chemin change sa ligne ici.
  */
 export const ORIGINES: Readonly<Record<string, string>> = {
   'https://aoknowledge.com': '/auth/lien',
@@ -70,8 +76,8 @@ export const ORIGINES: Readonly<Record<string, string>> = {
   'https://journal.aoknowledge.com': '/auth/lien',
   'https://masterclass.aoknowledge.com': '/auth/lien',
   'https://pilotage.aoknowledge.com': '/auth/lien',
-  [`chrome-extension://${EXTENSION_CARNET_STORE}`]: '/auth/lien',
-  [`chrome-extension://${EXTENSION_CARNET_LOCALE}`]: '/auth/lien',
+  [`chrome-extension://${EXTENSION_CARNET_STORE}`]: PAGE_LIEN_CARNET,
+  [`chrome-extension://${EXTENSION_CARNET_LOCALE}`]: PAGE_LIEN_CARNET,
 }
 export const ORIGINE_DEFAUT = 'https://aoknowledge.com'
 
@@ -106,13 +112,15 @@ export function enTetesCors(origin: string | null | undefined): Record<string, s
 
 /**
  * La base du lien de l'email : l'origine demandée par la page si elle est sur
- * la liste, sinon l'origine de la requête, sinon aoknowledge.com. Le chemin est
- * celui de l'origine (jamais lu dans la requête).
+ * la liste, sinon l'origine de la requête, sinon aoknowledge.com. Le chemin (ou
+ * l'adresse complète) est celui de l'origine dans ORIGINES, jamais lu dans la
+ * requête.
  */
 export function baseDuLien(demandee: unknown, origin: string | null | undefined): string {
   const o = typeof demandee === 'string' && origineAutorisee(demandee) ? demandee
     : origineAutorisee(origin) ? origin : ORIGINE_DEFAUT
-  return o + ORIGINES[o]
+  const retour = ORIGINES[o]
+  return retour.startsWith('https://') ? retour : o + retour
 }
 
 /** Un chemin de retour interne et sûr (mêmes règles que src/lib/retour.ts du site), sinon null. */

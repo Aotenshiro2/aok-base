@@ -13,6 +13,7 @@ import { useEnvoiCode } from '@/hooks/useEnvoiCode'
 import {
   AdresseInconnue, AdresseRattachee, C, PorteGoogle, RegardeTaBoite, S, styleChamp, Tourne,
 } from '@/components/connexion/Ecrans'
+import { CadreConnexion } from '@/components/connexion/Cadre'
 
 // La page de connexion du journal reconnaît l'adresse (16/11/2026, brief
 // 2026-11-16-connexion-ecosysteme : le parcours de aoknowledge.com/connexion,
@@ -170,35 +171,7 @@ function AuthPage() {
   }
 
   return (
-    <div
-      className="dark"
-      style={{
-        position: 'relative', minHeight: '100dvh', overflow: 'hidden',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
-        background: 'radial-gradient(130% 120% at 50% 6%, #121214 0%, #050506 55%, #000000 100%)',
-      }}
-    >
-      {/* Même fond canvas que la landing : l'auth « apparaît » sur le canvas, pas de rupture */}
-      <div className="canvas-aurora"><span className="aurora-blob" /></div>
-      <div className="canvas-grid-dots" style={{ backgroundSize: '22px 22px' }} />
-      <div className="canvas-top-gradient" />
-
-      <div
-        className="canvas-float-pill"
-        style={{ position: 'relative', zIndex: 10, width: '100%', maxWidth: 380, padding: 32, borderRadius: 18 }}
-      >
-        {/* Logo / titre */}
-        <div className="mb-6 text-center">
-          <div
-            className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-4"
-            style={{ background: 'rgba(252, 223, 62, 0.12)', border: '1px solid rgba(252, 223, 62, 0.30)' }}
-          >
-            <span className="text-2xl">📚</span>
-          </div>
-          <h1 className="text-xl font-semibold" style={{ color: 'var(--node-title)' }}>AOKnowledge</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--node-meta)' }}>Journal d&#39;Études</p>
-        </div>
-
+    <CadreConnexion>
         {(ecran === 'adresse' || ecran === 'verif') && (
           <>
             {/* Aide : les clients existants retrouvent leurs accès par l'email d'achat */}
@@ -335,8 +308,7 @@ function AuthPage() {
         <p className="mt-6 text-center text-xs" style={{ color: 'var(--node-meta)', opacity: 0.75 }}>
           {T.ecosysteme}
         </p>
-      </div>
-    </div>
+    </CadreConnexion>
   )
 }
 
