@@ -7,7 +7,8 @@ import { envoyerServeur } from '@/lib/connexion-adresse'
 /**
  * POST /api/connexion/envoi : envoie le code de connexion à 6 chiffres et le
  * lien, par Resend (14/11/2026, page de connexion du site, fenêtre d'achat,
- * /acces-club). Route PUBLIQUE (middleware.ts) : la garde est ici, dans
+ * /acces-club ; 16/11/2026 : journal, masterclass, Pilotage, extension du
+ * Carnet). Route PUBLIQUE (middleware.ts) : la garde est ici, dans
  * connexion-adresse-pur.ts et dans la fonction SQL aok_connexion_envoi
  * (adresse rattachée en secondaire refusée, adresse inconnue sans « creer »
  * refusée, 60 s par adresse, limites par adresse et par IP, plafond de 90

@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
-  ORIGINES, ORIGINE_DEFAUT, PLANCHER_MS, SUJET, EXPEDITEUR,
+  ORIGINES, ORIGINE_DEFAUT, PLANCHER_MS, SUJET, EXPEDITEUR, EXTENSION_CARNET_STORE, EXTENSION_CARNET_LOCALE,
   baseDuLien, cheminRetourSur, enTetesCors, envoyer, hmacAdresse, hmacIp, lireEnvoiSql, lireJetonSupabase,
   lireReconnaissanceSql, modeleEmailConnexion, origineAutorisee, plancher, reconnaitre, urlDuLien,
 } from '../src/lib/connexion-adresse-pur.ts'
@@ -37,20 +37,34 @@ const codeErreur = e => (e && e.code) || 'erreur'
 
 // ------------------------------------------------------------------ CORS et lien
 
+const SITE = ['https://aoknowledge.com', 'https://www.aoknowledge.com', 'https://academie.melaniechart.com']
+// 16/11/2026 (brief 2026-11-16-connexion-ecosysteme) : le journal lui-meme, la masterclass, Pilotage,
+// et l'extension du Carnet (identifiant du Store, puis celui de la version locale).
+const PRODUITS = ['https://journal.aoknowledge.com', 'https://masterclass.aoknowledge.com', 'https://pilotage.aoknowledge.com']
+const CARNET = [`chrome-extension://${EXTENSION_CARNET_STORE}`, `chrome-extension://${EXTENSION_CARNET_LOCALE}`]
+
 await bloc('CORS : liste blanche stricte, toute autre origine refusee (null : 403 sans en-tete)', () => {
-  for (const o of ['https://aoknowledge.com', 'https://www.aoknowledge.com', 'https://academie.melaniechart.com']) {
+  for (const o of [...SITE, ...PRODUITS, ...CARNET]) {
     const h = enTetesCors(o)
     assert.equal(h['Access-Control-Allow-Origin'], o)
     assert.equal(h['Access-Control-Allow-Methods'], 'POST, OPTIONS')
     assert.equal(h['Access-Control-Allow-Headers'], 'Content-Type')
     assert.equal(h.Vary, 'Origin')
+    assert.equal(origineAutorisee(o), true, o)
   }
   for (const o of [null, undefined, '', 'null', 'https://evil.example', 'https://aoknowledge.com.evil.example', 'http://aoknowledge.com',
-    'https://aoknowledge.com/', 'https://journal.aoknowledge.com', 'https://masterclass.aoknowledge.com', 'http://localhost:5173', 'constructor', 'toString']) {
+    'https://aoknowledge.com/', 'https://journal.aoknowledge.com/', 'http://journal.aoknowledge.com', 'https://masterclass.aoknowledge.com.evil.example',
+    'http://pilotage.aoknowledge.com', 'https://pilotage.aoknowledge.com:8443', 'https://cockpit.aoknowledge.com', 'https://journal-d-etude-beta.vercel.app',
+    'http://localhost:5173', 'http://localhost:3000', 'chrome-extension://abcdefghijklmnopabcdefghijklmnop', `chrome-extension://${EXTENSION_CARNET_STORE}/`,
+    `CHROME-EXTENSION://${EXTENSION_CARNET_STORE}`, `moz-extension://${EXTENSION_CARNET_STORE}`, 'constructor', 'toString', '__proto__']) {
     assert.equal(enTetesCors(o), null, String(o))
     assert.equal(origineAutorisee(o), false, String(o))
   }
-  assert.deepEqual(Object.keys(ORIGINES).sort(), ['https://academie.melaniechart.com', 'https://aoknowledge.com', 'https://www.aoknowledge.com'])
+  assert.deepEqual(Object.keys(ORIGINES).sort(), [...SITE, ...PRODUITS, ...CARNET].sort())
+  // Les identifiants de l'extension : 32 lettres de a a p (format de Chrome), Store et version locale distincts.
+  for (const id of [EXTENSION_CARNET_STORE, EXTENSION_CARNET_LOCALE]) assert.match(id, /^[a-p]{32}$/)
+  assert.equal(EXTENSION_CARNET_STORE, 'phajegonlmgnjkkfdooedoddnmgpheic')
+  assert.notEqual(EXTENSION_CARNET_STORE, EXTENSION_CARNET_LOCALE)
 })
 
 await bloc('origine du lien : celle demandee si autorisee, sinon celle de la requete, sinon aoknowledge.com', () => {
@@ -58,6 +72,18 @@ await bloc('origine du lien : celle demandee si autorisee, sinon celle de la req
   assert.equal(baseDuLien('https://evil.example', 'https://www.aoknowledge.com'), 'https://www.aoknowledge.com/auth/lien')
   assert.equal(baseDuLien(undefined, 'https://evil.example'), 'https://aoknowledge.com/auth/lien')
   assert.equal(baseDuLien(42, null), `${ORIGINE_DEFAUT}/auth/lien`)
+  // Le site ne change pas : ses trois origines gardent /auth/lien.
+  for (const o of SITE) assert.equal(baseDuLien(o, o), `${o}/auth/lien`)
+  // Les produits : chacun sa page /auth/lien, qu'il la demande ou que ce soit l'origine de la requete.
+  for (const o of PRODUITS) {
+    assert.equal(baseDuLien(o, o), `${o}/auth/lien`)
+    assert.equal(baseDuLien(undefined, o), `${o}/auth/lien`)
+    assert.equal(baseDuLien('https://evil.example', o), `${o}/auth/lien`)
+  }
+  assert.equal(baseDuLien('https://pilotage.aoknowledge.com', 'https://masterclass.aoknowledge.com'), 'https://pilotage.aoknowledge.com/auth/lien')
+  // L'extension : son lien a elle (chrome-extension://) ne s'ouvre pas depuis un email ; en passant
+  // origine = une page web de la liste, le lien revient sur cette page (contrat inchange).
+  for (const o of CARNET) assert.equal(baseDuLien('https://journal.aoknowledge.com', o), 'https://journal.aoknowledge.com/auth/lien')
   assert.equal(cheminRetourSur('/academie/la-formation'), '/academie/la-formation')
   for (const v of ['//evil.example', 'https://evil.example', '/\\evil', '/a\tb', '', 'x'.repeat(301), 12, null]) assert.equal(cheminRetourSur(v), null, String(v))
   assert.equal(urlDuLien('https://aoknowledge.com/auth/lien', '/academie', 'abc_DEF-123', 'signup'),

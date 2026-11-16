@@ -23,6 +23,12 @@
 // d'origine du tout, est refusée (403, sans en-tête CORS), préflight compris.
 // Même délai minimal pour toutes les réponses (PLANCHER_MS).
 //
+// 16/11/2026 (brief 2026-11-16-connexion-ecosysteme : toute la connexion de
+// l'écosystème passe par ce parcours) : la liste s'ouvre au journal lui-même
+// (sa page /auth appelle ces routes, et le navigateur envoie Origin sur un
+// POST du même domaine), à la masterclass, à Pilotage et à l'extension du
+// Carnet du Trader.
+//
 // Aucun import relatif : Node 22 charge ce fichier tel quel
 // (scripts/verifier-connexion-adresse.mjs).
 
@@ -39,16 +45,33 @@ export const EXPEDITEUR = 'AO Knowledge <support@aoknowledge.com>'
 export const SUJET = 'Ton code de connexion AO Knowledge'
 
 /**
+ * L'extension « Le Carnet du Trader » : l'identifiant de la fiche du Chrome Web
+ * Store (celui des membres), puis celui de la version locale non empaquetée,
+ * calculé depuis la `key` de public/manifest.json du dépôt de l'extension (le
+ * zip du Store retire cette clé : les deux identifiants diffèrent).
+ */
+export const EXTENSION_CARNET_STORE = 'phajegonlmgnjkkfdooedoddnmgpheic'
+export const EXTENSION_CARNET_LOCALE = 'klggbgjkojkcblgodajdjhhineocchbe'
+
+/**
  * Les pages qui ont le droit d'appeler les deux routes, et où revient le lien
- * de l'email (le chemin de la page qui vérifie le jeton). À ajouter quand leur
- * formulaire branchera la même vérification : masterclass.aoknowledge.com,
- * pilotage.aoknowledge.com, journal.aoknowledge.com (chacune avec sa page
- * /auth/lien).
+ * de l'email (le chemin de la page qui vérifie le jeton par verifyOtp({
+ * token_hash, type })). Chaque produit a sa page /auth/lien : un produit dont
+ * la page porte un autre chemin change sa ligne ici.
+ * L'extension du Carnet : un lien chrome-extension:// ne s'ouvre pas depuis un
+ * email. Pour un lien utilisable, l'extension passe `origine` = une page web
+ * de la liste (par exemple https://journal.aoknowledge.com) ; sinon, seul le
+ * code de l'email sert.
  */
 export const ORIGINES: Readonly<Record<string, string>> = {
   'https://aoknowledge.com': '/auth/lien',
   'https://www.aoknowledge.com': '/auth/lien',
   'https://academie.melaniechart.com': '/auth/lien',
+  'https://journal.aoknowledge.com': '/auth/lien',
+  'https://masterclass.aoknowledge.com': '/auth/lien',
+  'https://pilotage.aoknowledge.com': '/auth/lien',
+  [`chrome-extension://${EXTENSION_CARNET_STORE}`]: '/auth/lien',
+  [`chrome-extension://${EXTENSION_CARNET_LOCALE}`]: '/auth/lien',
 }
 export const ORIGINE_DEFAUT = 'https://aoknowledge.com'
 

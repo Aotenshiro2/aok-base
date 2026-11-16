@@ -7,7 +7,8 @@ import { reconnaitreServeur } from '@/lib/connexion-adresse'
 /**
  * POST /api/connexion/adresse : ce que l'écosystème sait d'une adresse, pour
  * montrer la bonne porte sur la page de connexion du site (14/11/2026, option 3
- * de Brice). Route PUBLIQUE (middleware.ts) : la garde est ici, dans
+ * de Brice ; 16/11/2026 : toutes les connexions de l'écosystème, voir ORIGINES).
+ * Route PUBLIQUE (middleware.ts) : la garde est ici, dans
  * connexion-adresse-pur.ts et dans la fonction SQL aok_connexion_reconnaitre
  * (limites par IP et par adresse, sur des HMAC).
  *

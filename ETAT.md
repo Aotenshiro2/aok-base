@@ -1,5 +1,33 @@
 # ETAT du journal d etudes
 
+## LA CONNEXION DU JOURNAL PASSE AU PARCOURS DE AOKNOWLEDGE.COM/CONNEXION ; ROUTES /api/connexion/* OUVERTES A LA MASTERCLASS, A PILOTAGE ET A L'EXTENSION DU CARNET (16/11/2026, go de Brice relaye par l'Orchestre Academie, commite NON pousse, branche connexion-ecosysteme depuis origin/master e58c172 ; AUCUNE migration)
+
+- Brief : D:\7_Agents\briefs\2026-11-16-connexion-ecosysteme.md (section JOURNAL). Rapport :
+  D:\7_Agents\briefs\connexion-ecosysteme-journal-rapport.md. Captures : D:\7_Agents\briefs\connexion-ecosysteme\journal\.
+- /auth : un champ email et « Continuer » ; la page demande a /api/connexion/adresse (meme domaine) et montre UNE porte :
+  google, connue (le code part, « Regarde ta boite », code a 6 chiffres ou lien), inconnue (essayer l'adresse du paiement,
+  puis « Creer un compte gratuit avec cette adresse » : c'est LA creation de compte, la case newsletter appelle
+  /api/newsletter/subscribe comme avant), rattachee, simple (repli signInWithOtp vers /auth/callback, comme avant). Mot de
+  passe en lien secondaire, « Mot de passe oublie ? » sous le champ (meme lien Supabase vers /auth/reset-password, delai et
+  plafond qui guident). Plus d'inscription par mot de passe (le prenom n'est plus demande : full_name vide, deja gere).
+  ?redirectTo= (middleware, landing) suivi apres le code, le mot de passe et le lien ; Google garde /auth/callback -> /.
+- /auth/lien (nouvelle, publique par le prefixe /auth) : le lien de l'email, verifyOtp({ token_hash, type }), fragment
+  retire, echec -> /auth?error=lien_expire.
+- Fichiers : src/lib/connexion-page-pur.ts (pur, repris du site), src/lib/connexion-page.ts (appels), connexion-demo.ts
+  (NEXT_PUBLIC_CONNEXION_DEMO=1, dev seulement, absent du paquet construit), src/hooks/useEnvoiCode.ts et
+  useDecompteRenvoi.ts, src/components/connexion/Ecrans.tsx (look du journal), src/app/auth/page.tsx et lien/page.tsx,
+  reset-password-request (messages qui guident).
+- ORIGINES (connexion-adresse-pur.ts) : + https://journal.aoknowledge.com (le navigateur envoie Origin sur un POST du
+  meme domaine), https://masterclass.aoknowledge.com, https://pilotage.aoknowledge.com (lien -> <origine>/auth/lien : chaque
+  produit doit avoir cette page), chrome-extension://phajegonlmgnjkkfdooedoddnmgpheic (Store) et
+  chrome-extension://klggbgjkojkcblgodajdjhhineocchbe (version locale, cle du manifest). Pas de voie « code seul »
+  (consigne de l'Orchestre) : un lien chrome-extension:// ne s'ouvre pas depuis un email ; l'extension peut passer
+  origine = https://journal.aoknowledge.com pour un lien qui marche. journal-d-etude-beta.vercel.app n'est PAS sur la
+  liste : sur cette adresse, la page retombe sur signInWithOtp.
+- Verifs : node scripts/verifier-connexion-adresse.mjs (13 blocs), node scripts/verifier-connexion-page.mjs (10), tsc,
+  eslint, next build ; scripts verifier-connexion-* du site (origin/master exporte, 10 + 8) et controle croise du contrat.
+- MISE EN LIGNE : ce journal AVANT les autres produits (masterclass, Pilotage, Carnet).
+
 ## SMART MONEY TECHNIQUE PAR PARTIE : LA PARTIE 1 OU LA PARTIE 2 SEULE, CARTE ET 4x PAYPAL (15/11/2026, go de Brice « 1500 si les deux parties sont prises d'un coup, 850 en separe », commite NON pousse, branche parties-smt rebasee sur origin/master e0cd85f ; aucune migration ; RIEN cree en base ni chez Stripe ou PayPal)
 
 - Convention des offres de partie : slug « module-<module>-partie-<n> » (module-la-formation-complete-partie-1 et -2),

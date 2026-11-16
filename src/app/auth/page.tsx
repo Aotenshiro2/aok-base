@@ -3,140 +3,170 @@
 import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import {
+  adresseValide, cheminRetourSur, cleAdresse, DELAI_RENVOI_S, estGmail, issueEnvoi, messageOubli,
+  TEXTES as T, texteRenvoi,
+} from '@/lib/connexion-page-pur'
+import { continuerAvecGoogle, DEMO, reconnaitreAdresse } from '@/lib/connexion-page'
+import { useDecompteRenvoi } from '@/hooks/useDecompteRenvoi'
+import { useEnvoiCode } from '@/hooks/useEnvoiCode'
+import {
+  AdresseInconnue, AdresseRattachee, C, PorteGoogle, RegardeTaBoite, S, styleChamp, Tourne,
+} from '@/components/connexion/Ecrans'
 
-type AuthMode = 'signin' | 'signup'
+// La page de connexion du journal reconnaît l'adresse (16/11/2026, brief
+// 2026-11-16-connexion-ecosysteme : le parcours de aoknowledge.com/connexion,
+// le look du journal). Un champ email et « Continuer ». La page demande à la
+// route du journal /api/connexion/adresse ce que l'écosystème sait de
+// l'adresse et montre UNE porte :
+// - google    : « Continuer avec Google », le code par email en second ;
+// - connue    : le code part tout de suite, écran « Regarde ta boîte » ;
+// - inconnue  : « On ne connaît pas cette adresse », essayer celle du paiement
+//               d'abord, puis « Créer un compte gratuit avec cette adresse » :
+//               c'est LA création de compte du journal ;
+// - rattachee : adresse secondaire d'un compte, jamais de second compte ;
+// - simple    : la route ne répond pas, le code part (repli signInWithOtp).
+// Le mot de passe reste possible, en lien secondaire, avec « Mot de passe
+// oublié ? » (même lien de Supabase qu'avant, vers /auth/reset-password).
+// Le lien de l'email revient sur /auth/lien. Google et le repli gardent
+// /auth/callback (échange PKCE côté serveur), comme avant.
 
-// Style partagé des champs — sur les tokens canvas (thème clair/sombre).
-const inputStyle: React.CSSProperties = {
-  background: 'var(--node-bg)',
-  border: '1px solid var(--node-border)',
-  color: 'var(--node-title)',
-}
+type Ecran = 'adresse' | 'verif' | 'google' | 'boite' | 'inconnue' | 'creerGoogle' | 'rattachee'
 
 function AuthPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [mode, setMode] = useState<AuthMode>('signin')
+  // Retour après connexion (?redirectTo=, posé par le middleware et la landing ; chemins internes seulement).
+  const retour = cheminRetourSur(searchParams.get('redirectTo'))
+
+  const [ecran, setEcran] = useState<Ecran>('adresse')
   const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [name, setName] = useState('')
+  const adresse = email.trim()
   const [newsletter, setNewsletter] = useState(false)
+  const [versGoogle, setVersGoogle] = useState(false)
+  const [erreurGoogle, setErreurGoogle] = useState<string | null>(null)
+  const envoi = useEnvoiCode()
+
+  // Le mot de passe, en lien secondaire.
+  const [motDePasse, setMotDePasse] = useState(false)
+  const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
-  // Le callback sert à Google ET au lien magique : message neutre.
-  const [error, setError] = useState<string | null>(
-    searchParams.get('error') === 'auth_callback_failed'
-      ? 'La connexion a échoué. Si tu as utilisé un lien reçu par email, redemande-le et ouvre-le depuis ce navigateur.'
-      : null
-  )
+  // ?error= : retour de Google ou du repli (/auth/callback), ou d'un lien de l'email (/auth/lien).
+  const [error, setError] = useState<string | null>(() => {
+    const e = searchParams.get('error')
+    if (e === 'lien_expire') return T.lienExpire
+    if (e === 'auth_callback_failed') return T.connexionEchouee
+    return null
+  })
   const [success, setSuccess] = useState<string | null>(null)
-  // Lien magique : messages séparés, affichés sous son bouton.
-  const [linkLoading, setLinkLoading] = useState(false)
-  const [linkError, setLinkError] = useState<string | null>(null)
-  const [linkSentTo, setLinkSentTo] = useState<string | null>(null)
+  // « Mot de passe oublié ? » : son lien et le code partagent le même jeton chez Supabase,
+  // l'un annule l'autre. Il attend donc le décompte de l'un comme de l'autre.
+  const decompteOubli = useDecompteRenvoi()
+  const restantOubli = Math.max(envoi.restant(adresse), decompteOubli.cle === cleAdresse(adresse) ? decompteOubli.restant : 0)
 
-  // Lien magique : crée le compte s'il n'existe pas et marche aussi pour un compte Google.
-  // Même callback PKCE que Google (échange du code côté serveur).
-  const handleMagicLink = async () => {
-    const target = email.trim()
-    if (!target) return
-    setLinkLoading(true)
-    setLinkError(null)
-    setLinkSentTo(null)
-    setError(null)
-    setSuccess(null)
-    const supabase = createClient()
-    const { error } = await supabase.auth.signInWithOtp({
-      email: target,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    })
-    if (error) {
-      setLinkError(
-        error.status === 429
-          ? "Trop de demandes d'affilée. Attends quelques minutes et réessaie."
-          : error.message
-      )
-    } else {
-      setLinkSentTo(target)
-    }
-    setLinkLoading(false)
+  /** Connecté (code juste, ou lien ouvert dans un autre onglet). */
+  function arriver() {
+    if (DEMO) return
+    router.push(retour ?? '/')
   }
 
-  const handleGoogleLogin = async () => {
-    setLoading(true)
+  function changer() {
+    setEcran('adresse')
+    setErreurGoogle(null)
+    setVersGoogle(false)
+  }
+
+  async function continuer() {
+    if (ecran === 'verif') return
+    setSuccess(null)
+    if (!adresseValide(adresse)) {
+      setError(T.boite.adresseInvalide)
+      return
+    }
     setError(null)
-    const supabase = createClient()
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
-    })
-    if (error) {
-      setError(error.message)
-      setLoading(false)
+    setEcran('verif')
+    const r = await reconnaitreAdresse(adresse)
+    if (r === 'google') setEcran('google')
+    else if (r === 'inconnue') setEcran('inconnue')
+    else if (r === 'rattachee') setEcran('rattachee')
+    else void recevoirCode() // connue, ou la route ne répond pas : le parcours simple
+  }
+
+  // creer : le membre a choisi « Créer un compte gratuit » (gardé pour « Renvoyer »).
+  const [creation, setCreation] = useState(false)
+
+  async function recevoirCode(creer = false, renvoi = false) {
+    setEcran('boite')
+    setCreation(creer)
+    // Revenir sur la même adresse moins d'une minute après : rien ne repart (un envoi annulerait le précédent).
+    if (!renvoi && envoi.dejaParti(adresse)) return
+    const r = await envoi.envoyer(adresse, { creer, newsletter: creer && newsletter, retour })
+    if (r.t === 'rattachee') setEcran('rattachee')
+    else if (r.t === 'inconnue') setEcran('inconnue')
+    else if (creer && !renvoi && r.t === 'ok' && newsletter && !DEMO) {
+      // Comme avant : l'inscription à la newsletter juste après la création du compte
+      // (la route vérifie le compte de moins de 24 h qui a coché la case).
+      fetch('/api/newsletter/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: adresse }),
+      }).catch(() => {})
+    }
+  }
+
+  function creer() {
+    // Un Gmail : Google crée le compte sans email à attendre (le code reste possible).
+    if (estGmail(adresse)) setEcran('creerGoogle')
+    else void recevoirCode(true)
+  }
+
+  async function google(avecAdresse = true) {
+    setVersGoogle(true)
+    setErreurGoogle(null)
+    const e = await continuerAvecGoogle(avecAdresse ? adresse : null)
+    if (e) {
+      setErreurGoogle(e)
+      setVersGoogle(false)
     }
   }
 
   const handleEmailSignIn = async () => {
     setLoading(true)
     setError(null)
-    const supabase = createClient()
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    setSuccess(null)
+    const { error } = await createClient().auth.signInWithPassword({ email: adresse, password })
     if (error) {
-      // Cas typique : compte créé avec Google, donc sans mot de passe.
+      // Cas typique : compte créé avec Google ou par code, donc sans mot de passe.
       const invalidCredentials =
         error.code === 'invalid_credentials' || error.message === 'Invalid login credentials'
-      setError(
-        invalidCredentials
-          ? "Aucun compte ne correspond à ce mot de passe. Si tu t'es inscrit avec Google, utilise « Continuer avec Google ». Sinon, demande un lien de connexion par email ou clique « Mot de passe oublié ? »."
-          : error.message
-      )
+      setError(invalidCredentials ? T.motDePasseFaux : error.message)
       setLoading(false)
     } else {
-      router.push('/')
+      router.push(retour ?? '/')
     }
   }
 
-  const handleEmailSignUp = async () => {
-    setLoading(true)
-    setError(null)
-    const supabase = createClient()
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: name,
-          newsletter_subscribed: newsletter,
-        },
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    })
-    if (error) {
-      setError(error.message)
-    } else if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
-      // Anti-énumération Supabase : succès factice, aucun email ne part.
-      setError('Un compte existe déjà avec cet email : connecte-toi avec Google, ton mot de passe, ou un lien de connexion par email.')
-    } else {
-      if (newsletter) {
-        await fetch('/api/newsletter/subscribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, name }),
-        }).catch(() => {})
-      }
-      setSuccess('Vérifie tes emails pour confirmer ton compte.')
-    }
-    setLoading(false)
-  }
-
-  const switchMode = (m: AuthMode) => {
-    setMode(m)
+  // Mot de passe oublié : même champ email, même lien qu'avant (/auth/reset-password).
+  const handleForgotPassword = async () => {
     setError(null)
     setSuccess(null)
+    if (!adresse) {
+      setError(T.oubliSansAdresse)
+      return
+    }
+    if (restantOubli > 0) return
+    setLoading(true)
+    const { error } = await createClient().auth.resetPasswordForEmail(adresse, {
+      redirectTo: `${window.location.origin}/auth/reset-password`,
+    })
+    const issue = issueEnvoi(error)
+    const m = messageOubli(issue, adresse)
+    if (m.ok) setSuccess(m.texte)
+    else setError(m.texte)
+    if (issue.t === 'ok') decompteOubli.lancer(DELAI_RENVOI_S, cleAdresse(adresse))
+    else if (issue.t === 'delai') decompteOubli.lancer(issue.secondes, cleAdresse(adresse))
+    setLoading(false)
   }
 
   return (
@@ -148,7 +178,7 @@ function AuthPage() {
         background: 'radial-gradient(130% 120% at 50% 6%, #121214 0%, #050506 55%, #000000 100%)',
       }}
     >
-      {/* Même fond canvas que la landing → l'auth « apparaît » sur le canvas, pas de rupture */}
+      {/* Même fond canvas que la landing : l'auth « apparaît » sur le canvas, pas de rupture */}
       <div className="canvas-aurora"><span className="aurora-blob" /></div>
       <div className="canvas-grid-dots" style={{ backgroundSize: '22px 22px' }} />
       <div className="canvas-top-gradient" />
@@ -169,184 +199,141 @@ function AuthPage() {
           <p className="text-sm mt-1" style={{ color: 'var(--node-meta)' }}>Journal d&#39;Études</p>
         </div>
 
-        {/* Aide : les clients existants retrouvent leurs accès par l'email d'achat */}
-        <p className="text-xs mb-4 text-center" style={{ color: 'var(--node-meta)' }}>
-          Déjà client AOKnowledge (Live Club, formation, Skool...) ? Utilise l&#39;email de ton achat : tes accès s&#39;ouvrent automatiquement.
-        </p>
+        {(ecran === 'adresse' || ecran === 'verif') && (
+          <>
+            {/* Aide : les clients existants retrouvent leurs accès par l'email d'achat */}
+            <p className="text-xs mb-4 text-center" style={{ color: 'var(--node-meta)' }}>{T.aide}</p>
 
-        {/* Lien magique : chemin principal (sert aussi au formulaire mot de passe plus bas) */}
-        <div className="space-y-3">
-          <input
-            type="email"
-            placeholder="Email"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && !linkLoading && handleMagicLink()}
-            className="w-full px-3 py-2.5 rounded-lg text-sm placeholder-gray-400 focus:outline-none"
-            style={inputStyle}
-          />
-          <button
-            onClick={handleMagicLink}
-            disabled={linkLoading || loading || !email.trim()}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl
-              font-medium text-sm transition-opacity
-              disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ background: '#fcdf3e', color: '#1a1a1a' }}
-          >
-            {linkLoading && <span className="w-4 h-4 border-2 border-gray-700 border-t-transparent rounded-full animate-spin" />}
-            Recevoir un lien de connexion
-          </button>
-          {linkError && <p className="text-sm text-red-400">{linkError}</p>}
-          {linkSentTo && (
-            <p className="text-sm text-green-500">
-              Lien envoyé à {linkSentTo}. Ouvre-le depuis ce navigateur.
-            </p>
-          )}
-        </div>
-
-        {/* Séparateur */}
-        <div className="flex items-center gap-3 my-5">
-          <div className="flex-1 h-px" style={{ background: 'var(--float-border)' }} />
-          <span className="text-xs" style={{ color: 'var(--node-meta)' }}>ou</span>
-          <div className="flex-1 h-px" style={{ background: 'var(--float-border)' }} />
-        </div>
-
-        {/* Google */}
-        <button
-          onClick={handleGoogleLogin}
-          disabled={loading || linkLoading}
-          className="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-xl
-            bg-white text-gray-900 font-medium text-sm
-            hover:bg-gray-100 transition-colors
-            disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {loading ? (
-            <span className="w-5 h-5 border-2 border-gray-400 border-t-gray-800 rounded-full animate-spin" />
-          ) : (
-            <svg className="w-5 h-5" viewBox="0 0 24 24">
-              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-            </svg>
-          )}
-          Continuer avec Google
-        </button>
-
-        {/* Séparateur */}
-        <div className="flex items-center gap-3 my-5">
-          <div className="flex-1 h-px" style={{ background: 'var(--float-border)' }} />
-          <span className="text-xs" style={{ color: 'var(--node-meta)' }}>ou avec un mot de passe</span>
-          <div className="flex-1 h-px" style={{ background: 'var(--float-border)' }} />
-        </div>
-
-        {/* Onglets */}
-        <div className="flex rounded-lg overflow-hidden mb-5" style={{ border: '1px solid var(--float-border)' }}>
-          <button
-            onClick={() => switchMode('signin')}
-            className="flex-1 py-2 text-sm font-medium transition-colors"
-            style={{
-              background: mode === 'signin' ? 'var(--canvas-bg)' : 'transparent',
-              color: mode === 'signin' ? 'var(--node-title)' : 'var(--node-meta)',
-            }}
-          >
-            Connexion
-          </button>
-          <button
-            onClick={() => switchMode('signup')}
-            className="flex-1 py-2 text-sm font-medium transition-colors"
-            style={{
-              background: mode === 'signup' ? 'var(--canvas-bg)' : 'transparent',
-              color: mode === 'signup' ? 'var(--node-title)' : 'var(--node-meta)',
-            }}
-          >
-            Inscription
-          </button>
-        </div>
-
-        {/* Formulaires */}
-        <div className="space-y-3">
-          {mode === 'signup' && (
-            <input
-              type="text"
-              placeholder="Prénom ou pseudo"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-lg text-sm placeholder-gray-400 focus:outline-none"
-              style={inputStyle}
-            />
-          )}
-          {/* L'email est le champ unique en haut, partagé avec le lien magique */}
-          <div className="relative">
-            <input
-              type={showPassword ? 'text' : 'password'}
-              placeholder="Mot de passe"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && (mode === 'signin' ? handleEmailSignIn() : handleEmailSignUp())}
-              className="w-full px-3 py-2.5 pr-10 rounded-lg text-sm placeholder-gray-400 focus:outline-none"
-              style={inputStyle}
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword(v => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2"
-              style={{ color: 'var(--node-meta)' }}
-            >
-              {showPassword ? (
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
-              ) : (
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-              )}
-            </button>
-          </div>
-
-          {mode === 'signup' && (
-            <label className="flex items-start gap-2.5 cursor-pointer">
+            {/* Un champ, un bouton : la page reconnaît l'adresse */}
+            <form className="space-y-3" noValidate onSubmit={e => { e.preventDefault(); void continuer() }}>
               <input
-                type="checkbox"
-                checked={newsletter}
-                onChange={e => setNewsletter(e.target.checked)}
-                className="mt-0.5 rounded"
-                style={{ accentColor: '#fcdf3e' }}
+                type="email"
+                name="email"
+                autoComplete="email"
+                inputMode="email"
+                autoCapitalize="none"
+                placeholder="Email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                readOnly={ecran === 'verif'}
+                className={C.champ}
+                style={styleChamp}
               />
-              <span className="text-xs" style={{ color: 'var(--node-meta)' }}>
-                Recevoir les nouvelles fonctionnalités et conseils AOKnowledge
-              </span>
-            </label>
-          )}
+              <button type="submit" disabled={ecran === 'verif' || !adresse} className={C.principal} style={S.principal}>
+                {ecran === 'verif' && <Tourne />}
+                {ecran === 'verif' ? T.verification : T.continuer}
+              </button>
+              {error && <p role="alert" className={C.erreur}>{error}</p>}
+              {success && <p className={C.ok}>{success}</p>}
+            </form>
 
-          {error && <p className="text-sm text-red-400">{error}</p>}
-          {success && <p className="text-sm text-green-500">{success}</p>}
+            {/* Le mot de passe, pour ceux qui en ont un : en lien secondaire */}
+            {!motDePasse ? (
+              <p className="mt-5 text-center">
+                <button type="button" onClick={() => setMotDePasse(true)} className="text-xs underline underline-offset-4" style={S.lien}>
+                  {T.motDePasse}
+                </button>
+              </p>
+            ) : (
+              <div className="mt-5 space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 h-px" style={{ background: 'var(--float-border)' }} />
+                  <span className="text-xs" style={S.lien}>{T.avecMotDePasse}</span>
+                  <div className="flex-1 h-px" style={{ background: 'var(--float-border)' }} />
+                </div>
+                {/* L'email est le champ unique en haut */}
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    name="password"
+                    autoComplete="current-password"
+                    placeholder="Mot de passe"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && adresse && password && handleEmailSignIn()}
+                    className={`${C.champ} pr-10`}
+                    style={styleChamp}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(v => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2"
+                    style={S.lien}
+                    aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                  >
+                    {showPassword ? (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                    )}
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleEmailSignIn}
+                  disabled={loading || ecran === 'verif' || !adresse || !password}
+                  className={C.secondaire}
+                  style={S.secondaire}
+                >
+                  {loading && <Tourne clair />}
+                  {T.seConnecter}
+                </button>
+                <p className="text-center">
+                  <button
+                    type="button"
+                    onClick={handleForgotPassword}
+                    disabled={loading || restantOubli > 0}
+                    className="text-xs transition-colors disabled:opacity-40"
+                    style={S.lien}
+                  >
+                    {restantOubli > 0 ? `${T.oubli} ${texteRenvoi(restantOubli)}` : T.oubli}
+                  </button>
+                </p>
+              </div>
+            )}
+          </>
+        )}
 
-          {/* Bouton secondaire : le jaune est réservé au lien magique, chemin principal */}
-          <button
-            onClick={mode === 'signin' ? handleEmailSignIn : handleEmailSignUp}
-            disabled={loading || linkLoading || !email || !password || (mode === 'signup' && !name)}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl
-              font-medium text-sm transition-opacity
-              disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ background: 'transparent', color: 'var(--node-title)', border: '1px solid var(--float-border)' }}
-          >
-            {loading && <span className="w-4 h-4 border-2 border-gray-500 border-t-transparent rounded-full animate-spin" />}
-            {mode === 'signin' ? 'Se connecter' : 'Créer mon compte'}
-          </button>
+        {ecran === 'boite' && (
+          <RegardeTaBoite
+            email={adresse}
+            envoi={envoi.etat?.envoi ?? 'attente'}
+            restant={envoi.restant(adresse)}
+            onRenvoyer={() => void recevoirCode(creation, true)}
+            onChanger={changer}
+            onGoogle={() => void google()}
+            onConnecte={arriver}
+          />
+        )}
 
-          {mode === 'signin' && (
-            <p className="text-center text-xs">
-              <a
-                href="/auth/reset-password-request"
-                className="transition-colors"
-                style={{ color: 'var(--node-meta)' }}
-              >
-                Mot de passe oublié ?
-              </a>
-            </p>
-          )}
-        </div>
+        {(ecran === 'google' || ecran === 'creerGoogle') && (
+          <PorteGoogle
+            email={adresse}
+            creation={ecran === 'creerGoogle'}
+            erreur={erreurGoogle}
+            attente={versGoogle}
+            onGoogle={() => void google()}
+            onCode={() => void recevoirCode(ecran === 'creerGoogle')}
+            onChanger={changer}
+          />
+        )}
+
+        {ecran === 'inconnue' && (
+          <AdresseInconnue
+            email={adresse}
+            newsletter={newsletter}
+            onNewsletter={setNewsletter}
+            onEssayer={changer}
+            onCreer={creer}
+          />
+        )}
+
+        {ecran === 'rattachee' && (
+          <AdresseRattachee onAutre={changer} onGoogle={() => void google(false)} />
+        )}
 
         <p className="mt-6 text-center text-xs" style={{ color: 'var(--node-meta)', opacity: 0.75 }}>
-          Compte unique pour tout l&#39;écosystème AOKnowledge
+          {T.ecosysteme}
         </p>
       </div>
     </div>

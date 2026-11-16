@@ -2,7 +2,11 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { issueEnvoi, textePlafond, texteDelai } from '@/lib/connexion-page-pur'
 
+// « Mot de passe oublié » en page à part (la page /auth le fait aussi sous son
+// champ, depuis le 16/11/2026). Les refus de Supabase guident : un lien vient
+// de partir (délai par adresse), ou le plafond d'envoi est atteint.
 export default function ResetPasswordRequestPage() {
   const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
@@ -13,14 +17,14 @@ export default function ResetPasswordRequestPage() {
     setLoading(true)
     setError(null)
     const supabase = createClient()
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
       redirectTo: `${window.location.origin}/auth/reset-password`,
     })
-    if (error) {
-      setError(error.message)
-    } else {
-      setSuccess(true)
-    }
+    const issue = issueEnvoi(error)
+    if (issue.t === 'ok') setSuccess(true)
+    else if (issue.t === 'delai') setError(texteDelai(issue.secondes))
+    else if (issue.t === 'plafond') setError(textePlafond())
+    else setError(issue.message || "L'email n'est pas parti. Réessaie.")
     setLoading(false)
   }
 
