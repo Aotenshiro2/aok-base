@@ -1,20 +1,36 @@
 ---
 sujet: masterclass
 titre: Les masterclass
-resume: Cinq replays gratuits de masterclass sur la psychologie, le risque et l'exécution, sur masterclass.aoknowledge.com, avec un compte AOKnowledge.
-mots: masterclass, replay, vidéo, psychologie, perte, stop-loss, risque, gestion des risques, objectifs, compétence, gratuit
-verifie: 2026-10-19
-sources: sites/Masterclass (src/data/masterclasses.ts, src/App.tsx : une seule page, pas d'adresse propre a chaque masterclass, bouton Replays ; src/components/AuthGate.tsx) ; sites/Aoknowledgecom/v3/src/pages/MonEspaceAppsPage.tsx (« Accès libre ») ; apps/journal-d-etude/src/lib/support-prompt.ts (contexte masterclass). La liste est controlee par scripts/generer-connaissances.mjs contre src/data/masterclasses.ts.
+resume: Les replays gratuits des masterclass sur la psychologie, le risque, l'exécution et l'organisation du trader, sur masterclass.aoknowledge.com, avec un compte AOKnowledge.
+mots: masterclass, replay, vidéo, psychologie, perte, stop-loss, risque, gestion des risques, objectifs, compétence, émotion, stress, incertitude, confiance, backtesting, journaling, edge, gratuit
+verifie: 2026-11-16
+sources: sites/Masterclass (src/data/masterclasses.ts, src/App.tsx : une seule page, pas d'adresse propre a chaque masterclass, bouton Replays ; src/components/ReplayDrawer.tsx : tous les replays dans la meme liste, meme acces ; src/components/AuthGate.tsx) ; sites/Aoknowledgecom/v3/src/pages/MonEspaceAppsPage.tsx (« Accès libre ») ; apps/journal-d-etude/src/lib/support-prompt.ts (contexte masterclass). Les replays ajoutes les 26 et 27/10 n'ont encore ni sous-titre ni points cles dans masterclasses.ts : la fiche ne cite que leur titre, tel qu'affiche sur le site. La liste est controlee par scripts/generer-connaissances.mjs contre src/data/masterclasses.ts.
 ---
 
 ## Ce que c'est
 
-Les masterclass sont des sessions complètes, en replay, sur la psychologie et l'exécution du trader. Il y en a cinq :
+Les masterclass sont des sessions complètes, en replay, sur la psychologie, le risque, l'exécution et l'organisation du trader. Les cinq premières, avec leur contenu :
 - Ta Dernière Perte est une Mine d'Or : transformer chaque perte en outil de progression (lire une perte au-delà du chiffre, ton point de bascule entre discipline et impulsion, un journaling qui fait progresser).
 - Transforme tes SL en guide vers le succès : le stop-loss comme un signal, pas une défaite (stop technique ou émotionnel, analyser tes SL pour affiner ton placement).
 - Le Piège du Trader Compétent : pourquoi la compétence seule ne suffit pas (le trader qui sait mais ne performe pas, passer de la compétence à la cohérence).
 - Gestion des Risques : construire un cadre solide pour préserver ton capital (un risque adapté à la taille de ton compte, le sizing de chaque trade, une règle de risque tenable sur le long terme).
 - Comment préparer tes objectifs : Trading 2025 : fixer des objectifs réalistes et structurer ta progression sur l'année.
+
+Les autres replays, sur la même page. Leur résumé n'est pas encore écrit : seul leur titre est connu.
+- Backtesting et Journaling
+- Gérer l'Émotion et le Stress
+- Comment Gérer l'Incertitude
+- Accomplir 1mois de travail en 1 semaine
+- Faut-il maitriser chaque concept
+- Le cumul d'emploi est-il bon pour votre trading
+- Aligne tes objectifs de trading avec ta croissance
+- Le trading comme miroir de ton inconscient
+- Confiance en soi Succès
+- Comment le journaling peut te perdre
+- Avant d'investir dans un projet Financier
+- Jongler entre retrait et croissance de capital
+- C'est quoi un Edge et comment Trouver le tiens ?
+- Explose tous tes objectifs en 2026
 
 ## Pour qui
 
