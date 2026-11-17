@@ -96,7 +96,7 @@ export function nomANoter(memoire: Map<number, string>, i: IdentiteTg, jour: str
 // - le webhook (noms.ts, rafraichirRegistre) : a chaque message (groupe ou
 //   prive), bouton ou demande d'un compte deja au registre, le pseudo ou le
 //   nom qui differe est corrige ;
-// - le passage quotidien (tache v, passage.ts) : quelques getChatMember
+// - le passage quotidien (tache w, passage.ts) : quelques getChatMember
 //   bornes sur les comptes presents au pseudo NULL ou pas relus depuis
 //   longtemps. maj_le sert d'horloge de relecture (remise a now() meme sans
 //   changement, pour que la rotation avance).

@@ -273,7 +273,7 @@ export type SynthesePassage = {
   }
   purge: { conversations: number }
   /**
-   * (v) Pseudos du registre (17/11, tachePseudos) : comptes relus chez
+   * (w) Pseudos du registre (17/11, tachePseudos) : comptes relus chez
    * Telegram (getChatMember, plafonne), pseudo ou nom corriges, illisibles
    * (refus ou compte introuvable), ecritures ratees. Jamais un nom.
    */
@@ -3466,7 +3466,7 @@ async function tipDuMembre(ctx: Contexte, tid: number, entreLe: string, aujourdh
 }
 
 // ---------------------------------------------------------------------------
-// (v) Pseudos du registre (17/11)
+// (w) Pseudos du registre (17/11)
 // ---------------------------------------------------------------------------
 
 /**
@@ -3754,7 +3754,7 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
   // (q) L'accueil etale en conseils (31/10), APRES les relances des lots (une
   // relance partie aujourd'hui decale le conseil a demain).
   await etape('tips', () => tacheTipsAccueil(ctx))
-  // (v) Pseudos du registre (17/11) : quelques getChatMember bornes, APRES
+  // (w) Pseudos du registre (17/11) : quelques getChatMember bornes, APRES
   // les sorties (un compte sorti aujourd'hui n'est plus present) et avant le
   // resume et l'agent, qui cherchent les membres par leur @.
   await etape('pseudos', () => tachePseudos(ctx))

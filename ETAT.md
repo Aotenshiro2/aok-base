@@ -7,7 +7,7 @@
 - Registre (cockpit_telegram_membres) : rafraichirRegistre (noms.ts) a chaque message du groupe Live Club (identite
   de l'auteur seulement, jamais le texte), message prive, bouton ou demande d'adhesion : compte deja connu seulement,
   une requete par identite et par instance, un pseudo ou nom absent n'efface rien ; changement = historique des noms.
-- Passage quotidien, tache (v) tachePseudos : getChatMember sur 25 comptes presents au plus (pseudo NULL pas relus
+- Passage quotidien, tache (w) tachePseudos : getChatMember sur 25 comptes presents au plus (pseudo NULL pas relus
   depuis 7 jours d'abord, puis pas relus depuis 30 jours), 429 = arret ; maj_le sert d'horloge de relecture ; la
   presence n'est jamais touchee. Synthese : pseudos { relus, corriges, inconnus, echecs }.
 - Agent (agent-cockpit.ts) : chercher aussi par nom_affiche (ILIKE), historique des noms, messages et archive ; un
