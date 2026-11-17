@@ -87,3 +87,68 @@ export function nomANoter(memoire: Map<number, string>, i: IdentiteTg, jour: str
   memoire.set(i.telegramId, cle)
   return true
 }
+
+// ---------------------------------------------------------------------------
+// (17/11) Le REGISTRE du groupe (cockpit_telegram_membres) suit les pseudos.
+// Cas reel : un compte venu du rattrapage du 10/09, pseudo NULL, qui a pris
+// un pseudo ensuite ; l'agent du cockpit le cherchait par @pseudo et
+// concluait « jamais vu ». Deux filets, sans nouveau mecanisme :
+// - le webhook (noms.ts, rafraichirRegistre) : a chaque message (groupe ou
+//   prive), bouton ou demande d'un compte deja au registre, le pseudo ou le
+//   nom qui differe est corrige ;
+// - le passage quotidien (tache v, passage.ts) : quelques getChatMember
+//   bornes sur les comptes presents au pseudo NULL ou pas relus depuis
+//   longtemps. maj_le sert d'horloge de relecture (remise a now() meme sans
+//   changement, pour que la rotation avance).
+// Un pseudo ou un nom ABSENT cote Telegram n'efface rien (comme l'upsert du
+// webhook, coalesce) : l'historique des noms garde la trace du changement.
+// ---------------------------------------------------------------------------
+
+/** Ce que le registre sait d'un compte. */
+export type IdentiteRegistre = { pseudo: string | null; nomAffiche: string | null }
+
+/** Relectures getChatMember par passage, au plus (pas de rafale chez Telegram). */
+export const PLAFOND_RELECTURES_PSEUDO = 25
+/** Un compte present SANS pseudo est relu au plus une fois par ... jours. */
+export const JOURS_RELECTURE_SANS_PSEUDO = 7
+/** Un compte present AVEC pseudo est relu au plus une fois par ... jours. */
+export const JOURS_RELECTURE_PSEUDO = 30
+
+/**
+ * Les champs du registre a corriger d'apres ce que Telegram rend. null = rien
+ * a ecrire. Un pseudo ou un nom absent cote Telegram ne remplace jamais celui
+ * du registre. La comparaison se fait sur la forme propre (textePropre) : un
+ * espace en trop dans la base n'est pas un changement, une casse differente
+ * en est un (c'est ainsi que Telegram l'affiche).
+ */
+export function champsARafraichir(base: IdentiteRegistre, vu: IdentiteTg): Partial<IdentiteRegistre> | null {
+  const champs: Partial<IdentiteRegistre> = {}
+  const pseudoBase = textePropre(typeof base.pseudo === 'string' ? base.pseudo.replace(/^@+/, '') : null, MAX_PSEUDO)
+  const nomBase = textePropre(base.nomAffiche, MAX_NOM)
+  if (vu.pseudo && vu.pseudo !== pseudoBase) champs.pseudo = vu.pseudo
+  if (vu.nomAffiche && vu.nomAffiche !== nomBase) champs.nomAffiche = vu.nomAffiche
+  return Object.keys(champs).length > 0 ? champs : null
+}
+
+/** La cle d'une identite vue (pseudo et nom), sans le jour. */
+export function cleIdentite(i: IdentiteTg): string {
+  return JSON.stringify([i.pseudo, i.nomAffiche])
+}
+
+/**
+ * Faut-il confronter cette identite au registre ? Vrai la premiere fois qu'on
+ * voit ce compte avec ce pseudo et ce nom sur cette instance du serveur, faux
+ * ensuite : un membre qui ecrit cent messages ne fait qu'une requete. La
+ * memoire est tenue par l'appelant ; on la marque APRES une requete reussie
+ * (memoriserIdentite), pour qu'une panne de base laisse retenter au message
+ * suivant.
+ */
+export function identiteARelire(memoire: Map<number, string>, i: IdentiteTg): boolean {
+  return memoire.get(i.telegramId) !== cleIdentite(i)
+}
+
+/** Marque l'identite comme confrontee. Memoire bornee comme celle de nomANoter. */
+export function memoriserIdentite(memoire: Map<number, string>, i: IdentiteTg): void {
+  if (memoire.size >= MAX_MEMOIRE_NOMS && !memoire.has(i.telegramId)) memoire.clear()
+  memoire.set(i.telegramId, cleIdentite(i))
+}

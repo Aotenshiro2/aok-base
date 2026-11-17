@@ -69,6 +69,8 @@ import {
 } from '../src/lib/liveclub/resume-pur.ts'
 import {
   textePropre, identiteTelegram, ligneNom, cleNomDuJour, nomANoter, MAX_PSEUDO, MAX_NOM, MAX_MEMOIRE_NOMS,
+  champsARafraichir, cleIdentite, identiteARelire, memoriserIdentite,
+  PLAFOND_RELECTURES_PSEUDO, JOURS_RELECTURE_SANS_PSEUDO, JOURS_RELECTURE_PSEUDO,
 } from '../src/lib/liveclub/noms-pur.ts'
 import {
   JOURS_GARDE_CHANGEMENT, MAX_CHANGEMENTS_LIBRE_SERVICE, VALIDITE_CHOIX_MINUTES, RAISON_CHANGEMENT_COMPTE,
@@ -2557,6 +2559,67 @@ test('historique des noms : une ecriture par compte et par jour en prive (noms-p
   for (let k = 1; k <= MAX_MEMOIRE_NOMS; k++) pleine.set(k, 'x')
   assert.equal(nomANoter(pleine, identiteTelegram({ id: MAX_MEMOIRE_NOMS + 1, first_name: 'z' }), '2026-10-15'), true)
   assert.equal(pleine.size, 1)
+})
+
+test('registre du groupe : le pseudo et le nom suivent Telegram (noms-pur, 17/11)', () => {
+  // Le cas du 17/11 : compte du rattrapage, pseudo NULL, qui a pris un pseudo.
+  const vu = identiteTelegram({ id: 77, first_name: 'Jean', last_name: 'Dupont', username: 'jdup' })
+  assert.deepEqual(champsARafraichir({ pseudo: null, nomAffiche: 'Jean Dupont' }, vu), { pseudo: 'jdup' })
+  // Pseudo change, nom change : les deux.
+  assert.deepEqual(champsARafraichir({ pseudo: 'ancien', nomAffiche: 'Jean' }, vu), { pseudo: 'jdup', nomAffiche: 'Jean Dupont' })
+  // Deja a jour : rien. Un @ ou un espace en trop dans la base n'est pas un changement.
+  assert.equal(champsARafraichir({ pseudo: 'jdup', nomAffiche: 'Jean Dupont' }, vu), null)
+  assert.equal(champsARafraichir({ pseudo: '@jdup', nomAffiche: ' Jean  Dupont ' }, vu), null)
+  // Une casse differente en est un (Telegram l'affiche ainsi).
+  assert.deepEqual(champsARafraichir({ pseudo: 'JDup', nomAffiche: 'Jean Dupont' }, vu), { pseudo: 'jdup' })
+  // Un pseudo ou un nom ABSENT cote Telegram n'efface rien.
+  const sansPseudo = identiteTelegram({ id: 77, first_name: 'Jean', last_name: 'Dupont' })
+  assert.equal(champsARafraichir({ pseudo: 'jdup', nomAffiche: 'Jean Dupont' }, sansPseudo), null)
+  const vide = identiteTelegram({ id: 77, first_name: ' ' })
+  assert.equal(champsARafraichir({ pseudo: 'jdup', nomAffiche: 'Jean Dupont' }, vide), null)
+  // Registre vide des deux cotes : tout ce que Telegram donne.
+  assert.deepEqual(champsARafraichir({ pseudo: null, nomAffiche: null }, vu), { pseudo: 'jdup', nomAffiche: 'Jean Dupont' })
+})
+
+test('registre du groupe : une requete par compte et par identite (noms-pur, 17/11)', () => {
+  const memoire = new Map()
+  const jean = identiteTelegram({ id: 77, first_name: 'Jean', username: 'jdup' })
+  // Pas encore confronte : oui. Tant qu'on ne marque pas (panne de base), on retente.
+  assert.equal(identiteARelire(memoire, jean), true)
+  assert.equal(identiteARelire(memoire, jean), true)
+  memoriserIdentite(memoire, jean)
+  assert.equal(identiteARelire(memoire, jean), false)
+  // Pas de jour dans la cle : le lendemain non plus, tant que rien ne change.
+  assert.equal(cleIdentite(jean), JSON.stringify(['jdup', 'Jean']))
+  // Un pseudo pris ou change : de nouveau une requete.
+  assert.equal(identiteARelire(memoire, identiteTelegram({ id: 77, first_name: 'Jean', username: 'jean_d' })), true)
+  // Un autre compte : le sien.
+  assert.equal(identiteARelire(memoire, identiteTelegram({ id: 78, first_name: 'Jean', username: 'jdup' })), true)
+  // Memoire bornee : pleine, elle repart de zero.
+  const pleine = new Map()
+  for (let k = 1; k <= MAX_MEMOIRE_NOMS; k++) pleine.set(k, 'x')
+  memoriserIdentite(pleine, identiteTelegram({ id: MAX_MEMOIRE_NOMS + 1, first_name: 'z' }))
+  assert.equal(pleine.size, 1)
+  // Les bornes du passage : peu de relectures, le pseudo vide relu plus souvent.
+  assert.ok(PLAFOND_RELECTURES_PSEUDO > 0 && PLAFOND_RELECTURES_PSEUDO <= 30)
+  assert.ok(JOURS_RELECTURE_SANS_PSEUDO >= 1 && JOURS_RELECTURE_SANS_PSEUDO < JOURS_RELECTURE_PSEUDO)
+})
+
+test('registre du groupe : branche dans le webhook, le passage et les consignes de l agent (17/11)', () => {
+  const route = readFileSync(new URL('../src/app/api/cockpit/liveclub/telegram/route.ts', import.meta.url), 'utf8')
+  // Groupe : seulement le chat du Live Club, seulement l'auteur, avant le retour.
+  assert.match(route, /String\(update\.message\.chat\?\.id\) === groupe\) \{\n\s+await rafraichirRegistre\(update\.message\.from, 'message'\)/)
+  assert.match(route, /rafraichirRegistre\(update\.callback_query\.from, 'prive'\)/)
+  const passage = readFileSync(new URL('../src/lib/liveclub/passage.ts', import.meta.url), 'utf8')
+  assert.match(passage, /await etape\('pseudos', \(\) => tachePseudos\(ctx\)\)/)
+  assert.match(passage, /limit \$\{PLAFOND_RELECTURES_PSEUDO\}/)
+  // La presence n'est jamais touchee par la relecture des pseudos.
+  const tache = passage.slice(passage.indexOf('async function tachePseudos'), passage.indexOf('// (d) Purge des conversations'))
+  assert.doesNotMatch(tache, /present\s*=/)
+  const agent = readFileSync(new URL('../src/lib/agent-cockpit.ts', import.meta.url), 'utf8')
+  assert.match(agent, /NE CHERCHE PAS SEULEMENT PAR PSEUDO/)
+  assert.match(agent, /il est déjà exempté depuis le/i)
+  assert.match(agent, /c'est la colonne email de son exemption qui compte/)
 })
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,20 @@
 # ETAT du journal d etudes
 
+## REGISTRE DU GROUPE : LES PSEUDOS SUIVENT, L'AGENT NE CONCLUT PLUS « JAMAIS VU » (17/11/2026, commite NON pousse, branche correctif-pseudos-1711 ; aucune migration)
+
+- Cas reel du 17/11 : Melanie demande une exemption pour un @pseudo ; l'agent repond « jamais vu dans le groupe ».
+  Le compte etait present (ligne du rattrapage du 10/09, pseudo NULL, pseudo pris ensuite) et DEJA exempte.
+- Registre (cockpit_telegram_membres) : rafraichirRegistre (noms.ts) a chaque message du groupe Live Club (identite
+  de l'auteur seulement, jamais le texte), message prive, bouton ou demande d'adhesion : compte deja connu seulement,
+  une requete par identite et par instance, un pseudo ou nom absent n'efface rien ; changement = historique des noms.
+- Passage quotidien, tache (v) tachePseudos : getChatMember sur 25 comptes presents au plus (pseudo NULL pas relus
+  depuis 7 jours d'abord, puis pas relus depuis 30 jours), 429 = arret ; maj_le sert d'horloge de relecture ; la
+  presence n'est jamais touchee. Synthese : pseudos { relus, corriges, inconnus, echecs }.
+- Agent (agent-cockpit.ts) : chercher aussi par nom_affiche (ILIKE), historique des noms, messages et archive ; un
+  seul candidat = « c'est bien lui ? » ; verifier l'exemption active avant d'en proposer une ; academie d'un exempte =
+  colonne email de l'exemption (a demander, posee depuis le cockpit). Regles pures : noms-pur.ts, 3 blocs dans
+  verifier-liveclub.mjs.
+
 ## LA CONNEXION DU JOURNAL PASSE AU PARCOURS DE AOKNOWLEDGE.COM/CONNEXION ; ROUTES /api/connexion/* OUVERTES A LA MASTERCLASS, A PILOTAGE ET A L'EXTENSION DU CARNET (16/11/2026, go de Brice relaye par l'Orchestre Academie, commite NON pousse, branche connexion-ecosysteme depuis origin/master e58c172 ; AUCUNE migration)
 
 - Brief : D:\7_Agents\briefs\2026-11-16-connexion-ecosysteme.md (section JOURNAL). Rapport :

@@ -9,7 +9,7 @@ import { alerterEquipeTexte } from '@/lib/alerte-equipe-telegram'
 import { reconnaitrePersonne } from '@/lib/liveclub/reconnaissance'
 import type { Reconnaissance } from '@/lib/liveclub/reconnaissance-pur'
 import { appelTelegram } from '@/lib/liveclub/telegram'
-import { noterNomTelegram } from '@/lib/liveclub/noms'
+import { noterNomTelegram, rafraichirRegistre } from '@/lib/liveclub/noms'
 import { chatDeLUpdate } from '@/lib/liveclub/mouvements-pur'
 import { chatsTracesDuServeur, enregistrerMouvement } from '@/lib/liveclub/mouvements'
 
@@ -27,6 +27,9 @@ import { chatsTracesDuServeur, enregistrerMouvement } from '@/lib/liveclub/mouve
 // ignore sans log ni ecriture. Le bot est admin du groupe et "message" est
 // ecoute pour le prive : sans ce filtre, tout ce qui se dit dans le groupe
 // passerait par ici. La table dit QUI est la, jamais ce qui s'y dit.
+// (17/11) Seule exception : le pseudo et le nom de l'auteur d'un message du
+// groupe Live Club tiennent le registre a jour (rafraichirRegistre), sans
+// rien lire ni garder du message.
 //
 // C'est un bot DIFFERENT de l'agent (@aok_cockpit_bot) : l'agent parle en
 // prive a Brice et Melanie, celui-ci aux membres du groupe.
@@ -55,7 +58,17 @@ export async function POST(req: NextRequest) {
   const update = await req.json().catch(() => ({}))
 
   // (1) Hors prive : rien, tout de suite, sans log ni ecriture.
+  // (17/11) Une seule exception, l'IDENTITE de l'auteur dans le groupe Live
+  // Club (et lui seul, chat_id connu) : si son pseudo ou son nom differe du
+  // registre, le registre suit (rafraichirRegistre, noms.ts : compte deja
+  // connu seulement, une requete par identite et par instance, jamais le
+  // texte, aucun nom dans les logs). Cas du 17/11 : un compte au pseudo NULL
+  // depuis le rattrapage du 10/09, introuvable par son @ pour l'agent.
   if (update.message && update.message.chat?.type !== 'private') {
+    const groupe = process.env.TELEGRAM_LIVECLUB_CHAT_ID?.trim()
+    if (groupe && String(update.message.chat?.id) === groupe) {
+      await rafraichirRegistre(update.message.from, 'message')
+    }
     return NextResponse.json({ ok: true })
   }
 
@@ -87,6 +100,11 @@ export async function POST(req: NextRequest) {
   // on repond 200. Le dedoublonnage (2) vit dans chaque traitement.
   if (update.message || update.callback_query || update.chat_join_request) {
     if (!idLisible) return NextResponse.json({ ok: true })
+    // (17/11) Le registre du groupe suit le pseudo et le nom du compte qui
+    // ecrit, clique ou demande a entrer (noms.ts, ne leve jamais).
+    if (update.message) await rafraichirRegistre(update.message.from, 'prive')
+    else if (update.callback_query) await rafraichirRegistre(update.callback_query.from, 'prive')
+    else await rafraichirRegistre(update.chat_join_request?.from, 'evenement')
     try {
       if (update.message) await traiterMessagePrive(update.message, updateId)
       else if (update.callback_query) await traiterBouton(update.callback_query, updateId)

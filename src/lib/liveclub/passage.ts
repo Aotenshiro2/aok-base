@@ -128,6 +128,11 @@ import { tacheIndicateur } from './indicateur'
 import { recalculerAContacter } from './contact-instantane'
 import { rafraichirPointsJours } from '@/lib/points-jours'
 import { appelTelegram, envoyer, lienDemandeAdhesion } from './telegram'
+import { noterNomTelegram } from './noms'
+import {
+  JOURS_RELECTURE_PSEUDO, JOURS_RELECTURE_SANS_PSEUDO, PLAFOND_RELECTURES_PSEUDO, champsARafraichir, identiteTelegram,
+  type UtilisateurTg,
+} from './noms-pur'
 import { lireEtatFil, tracerGeste, tracerMessageBot } from './support-pont'
 import { quiRepond } from './support-pont-pur'
 import { lireHistorique } from './conversations'
@@ -267,6 +272,12 @@ export type SynthesePassage = {
     deja_faits: number; inconnus: number; echecs: number; coupe: boolean
   }
   purge: { conversations: number }
+  /**
+   * (v) Pseudos du registre (17/11, tachePseudos) : comptes relus chez
+   * Telegram (getChatMember, plafonne), pseudo ou nom corriges, illisibles
+   * (refus ou compte introuvable), ecritures ratees. Jamais un nom.
+   */
+  pseudos: { relus: number; corriges: number; inconnus: number; echecs: number }
   /**
    * (u) Indicateur d'Alex (05/11, indicateur.ts) : demandes parties chez Alex,
    * departs notes et dits a Alex, droits relus, illisibles, refus de Telegram
@@ -3455,6 +3466,83 @@ async function tipDuMembre(ctx: Contexte, tid: number, entreLe: string, aujourdh
 }
 
 // ---------------------------------------------------------------------------
+// (v) Pseudos du registre (17/11)
+// ---------------------------------------------------------------------------
+
+/**
+ * Le registre du groupe (cockpit_telegram_membres) relu chez Telegram pour
+ * quelques comptes presents : ceux au pseudo NULL pas relus depuis
+ * JOURS_RELECTURE_SANS_PSEUDO jours (d'abord), puis ceux pas relus depuis
+ * JOURS_RELECTURE_PSEUDO jours, les plus anciens en premier.
+ * PLAFOND_RELECTURES_PSEUDO getChatMember au plus, l'un apres l'autre ; une
+ * limite de debit de Telegram (429) arrete la tache. Le pseudo et le nom
+ * suivent champsARafraichir (noms-pur.ts : un absent n'efface rien) ; maj_le
+ * est remis a now() meme sans changement, pour que la rotation avance. La
+ * presence n'est JAMAIS touchee ici (les chat_member et la prudence des
+ * sorties s'en chargent). Une nouvelle identite va dans l'historique des
+ * noms (source 'groupe', comme le releve des participants).
+ * Le webhook fait le meme travail au fil des messages (rafraichirRegistre) :
+ * cette tache rattrape ceux qui n'ecrivent jamais.
+ */
+async function tachePseudos(ctx: Contexte) {
+  const s = ctx.s.pseudos
+  const c = chatId()
+  if (!c) return
+  let lignes: { telegram_id: bigint; pseudo: string | null; nom_affiche: string | null }[]
+  try {
+    lignes = await prisma.$queryRaw`
+      select telegram_id, pseudo, nom_affiche
+      from public.cockpit_telegram_membres
+      where present
+        and ((pseudo is null and maj_le < now() - make_interval(days => ${JOURS_RELECTURE_SANS_PSEUDO}))
+          or maj_le < now() - make_interval(days => ${JOURS_RELECTURE_PSEUDO}))
+      order by (pseudo is null) desc, maj_le asc
+      limit ${PLAFOND_RELECTURES_PSEUDO}`
+  } catch (err) {
+    erreur(ctx, 'pseudos_illisibles', err)
+    return
+  }
+  for (const l of lignes) {
+    if (tempsEcoule(ctx)) return
+    const tid = Number(l.telegram_id)
+    if (!Number.isSafeInteger(tid) || tid <= 0) continue
+    const r = await appelTelegram('getChatMember', { chat_id: c, user_id: tid })
+    s.relus++
+    if (!r.ok) {
+      s.inconnus++
+      if (r.code === 429) {
+        erreur(ctx, 'pseudos_limite_telegram')
+        return
+      }
+      continue
+    }
+    const brut = (r.result as { user?: UtilisateurTg } | undefined)?.user ?? null
+    const vu = identiteTelegram(brut)
+    if (!vu || vu.telegramId !== tid) {
+      s.inconnus++
+      continue
+    }
+    const champs = champsARafraichir({ pseudo: l.pseudo, nomAffiche: l.nom_affiche }, vu)
+    try {
+      await prisma.$executeRaw`
+        update public.cockpit_telegram_membres
+        set pseudo = coalesce(${champs?.pseudo ?? null}::text, pseudo),
+            nom_affiche = coalesce(${champs?.nomAffiche ?? null}::text, nom_affiche),
+            maj_le = now()
+        where telegram_id = ${tid}`
+    } catch (err) {
+      s.echecs++
+      erreur(ctx, 'pseudos_ecriture', err)
+      continue
+    }
+    if (champs) {
+      s.corriges++
+      await noterNomTelegram(brut, 'groupe', ctx.maintenant)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // (d) Purge des conversations privees
 // ---------------------------------------------------------------------------
 
@@ -3516,6 +3604,7 @@ function nouveauContexte(maintenant: Date): Contexte {
       },
       tips: { envoyes: 0, sautes: 0, decales: 0, absents: 0, sans_droit: 0, equipe: 0, deja_faits: 0, inconnus: 0, echecs: 0, coupe: false },
       purge: { conversations: 0 },
+      pseudos: { relus: 0, corriges: 0, inconnus: 0, echecs: 0 },
       indicateur: { etat: 'pas_lance', transmises: 0, departs: 0, prevenus: 0, verifies: 0, inconnus: 0, echecs: 0 },
       tarifs_reserves: { payees: 0, en_attente: 0, illisibles: 0 },
       parrainages: { etat: 'pas_lance', lues: 0, notees: 0, prevenus: 0, equipe: 0, reprises: 0, incertains: 0, annulees: 0, erreurs: 0 },
@@ -3665,6 +3754,10 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
   // (q) L'accueil etale en conseils (31/10), APRES les relances des lots (une
   // relance partie aujourd'hui decale le conseil a demain).
   await etape('tips', () => tacheTipsAccueil(ctx))
+  // (v) Pseudos du registre (17/11) : quelques getChatMember bornes, APRES
+  // les sorties (un compte sorti aujourd'hui n'est plus present) et avant le
+  // resume et l'agent, qui cherchent les membres par leur @.
+  await etape('pseudos', () => tachePseudos(ctx))
   // (u) L'indicateur d'Alex (05/11, indicateur.ts), APRES toutes les sorties
   // du jour (ctx.sortis : leur droit se relit d'abord). Ne jette pas ; table
   // absente (migration 20261105250000) : rien, sans erreur. Un refus de
