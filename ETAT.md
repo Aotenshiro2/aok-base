@@ -1,5 +1,32 @@
 # ETAT du journal d etudes
 
+## AGENT AOK : RAPPROCHER UNE LISTE DE PERSONNES AVEC LEURS COMPTES TELEGRAM (21/11/2026, commite NON pousse, branche agent-listes ; aucune migration)
+
+- Cause (enquete du 21/11) : une capture d'environ 120 emails d'ex-membres envoyee par Melanie ; l'agent a ecrit son SQL a la
+  main (pseudo declare au paiement, puis rattachements), rendu 56 personnes, ecrit « rien en base » et « ~150 » (aucune requete).
+- Outil rapprocher_liste (lecture, sans carte) : personnes (emails et/ou noms, 300 au plus) OU population
+  (desabonnes_live_club, membres_live_club). Pour chacune resoudrePersonne tel quel (fiche-personne.ts, meme verrou du fonds),
+  puis une fiche sans compte relue par ses emails (resoudrePersonne sur chacun), puis candidats par le nom (prenom ET nom, ou
+  nom abrege de meme squelette, dans les noms affiches du registre, des noms passes et de l'archive si fonds). Sortie : decompte
+  calcule + phrase a citer + une ligne par personne (nom Telegram = @pseudo sinon nom affiche, groupe, voie, confiance :
+  lien dur / probable / candidat par le nom / aucune trace / introuvable / plusieurs). Borne 30 000 car., decompte toujours
+  complet. Code : src/lib/rapprochement-liste.ts (+ -pur.ts).
+- Consigne : telegram null = rien saisi au paiement ; rattachements et registre d'abord (cockpit_contact_manuel ensuite) ;
+  liste = rapprocher_liste ; nom Telegram = @pseudo OU nom affiche ; jamais « rien en base » sans rapprochement complet ;
+  jamais un total non calcule ; RETROUVER LE COMPTE renvoie a l'outil pour plusieurs personnes.
+- Trace des outils (src/lib/agent-outils-trace-pur.ts) : outil, parametres resumes sans valeur, lignes, duree. Journal du
+  serveur (console.info « [cockpit/agent] outils ») pour les deux canaux, et champ `outils` de la ligne de reponse dans
+  cockpit_agent_conversations pour Agent AOK (jamais relu par le modele). Pas de trace sur un tour qui finit par une carte.
+- Image : CONSIGNE_LECTURE_IMAGE au tour qui porte une image ; le bloc <lu_dans_l_image> est retire de la reponse et garde
+  (8 000 car.) sous la reponse dans l'historique Telegram. La fenetre du cockpit ne le garde pas (historique du navigateur).
+- Mesure (lecture seule, 21/11) : desabonnes 138 = 66 lien dur, 6 probables, 4 candidats par le nom, 62 sans trace ; 52 par
+  @pseudo, 19 par nom affiche. Membres actuels 81 = 78 lien dur, 3 sans trace. 9 s depuis WSL.
+- Verif : node scripts/verifier-rapprochement-liste.mjs (12 blocs, dont la parite avec resoudrePersonne par une fausse
+  transaction). verifier-fiche-personne.mjs : perimetre mis a jour (rapprochement-liste.ts, et tab/lectures.ts qui importait
+  deja la fiche) ; il echoue encore sur master pour cartes-fin-de-mois.ts (lit cockpit_telegram_messages), hors de ce chantier.
+- Pas fait : import du nom affiche saisi au paiement (champ Stripe nomtelegram) : changement propose dans le rapport, a
+  decider (push_membres_supabase.py et une colonne cockpit_membres.telegram_nom).
+
 ## CARTES A BOUTONS ENVOYEES A PLUSIEURS COMPTES : FERMEES CHEZ TOUT LE MONDE APRES LA DECISION (21/11/2026, commite NON pousse, branche cartes-equipe ; aucune migration)
 
 - Cause : la carte « Lots à vérifier » partait a chaque compte de l'equipe ; Mel repond « Oui », Brice garde la carte
