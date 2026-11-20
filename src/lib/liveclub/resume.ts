@@ -81,6 +81,13 @@ import {
 } from './resume-pur'
 import { repriseAutomatique } from './support-pont-pur'
 
+/**
+ * (20/11) L'INTERRUPTEUR de la version courte du resume pour Melanie
+ * (composerResumeCourt). DESACTIVE tant que Brice n'a pas tranche : a false,
+ * elle recoit exactement le meme resume que Brice, comme avant.
+ */
+export const RESUME_COURT_MELANIE = false
+
 /** La fenetre ne remonte jamais plus loin (apres une coupure, un long silence). */
 const FENETRE_MAX_MS = 7 * 86_400_000
 /** Clients Stripe lus pour les noms et emails, au plus, par resume. */
@@ -803,16 +810,27 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
     const destinataires = await prisma.$queryRaw<{ telegram_id: bigint; libelle: string | null }[]>`
       select telegram_id, libelle from public.cockpit_telegram_comptes where diffusion = 'equipe' order by cree_le`
     const messages = decouperResume(texte)
-    // (20/11) Melanie recoit la version courte (ce qui demande une action
-    // d'elle) ; rien a faire pour elle = pas de message. Brice : inchange.
-    const court = composerResumeCourt(sansEquipe, annuaire.personnes, { depuis: depuis.toISOString(), jusqua: jusqua.toISOString() })
+    // (20/11) Interrupteur RESUME_COURT_MELANIE (en tete du fichier) : Melanie
+    // recoit la version courte (ce qui demande une action d'elle) ; rien a
+    // faire pour elle = pas de message. Brice : inchange. Une erreur de la
+    // version courte = la version complete pour elle aussi (undefined).
+    let court: { texte: string; reste: string[]; messages: string[] } | null | undefined
+    if (RESUME_COURT_MELANIE) {
+      try {
+        const c = composerResumeCourt(sansEquipe, annuaire.personnes, { depuis: depuis.toISOString(), jusqua: jusqua.toISOString() })
+        court = c ? { ...c, messages: decouperResume(c.texte) } : null
+      } catch (err) {
+        console.warn(`[liveclub/resume] version courte impossible, version complete pour tous : ${messageErreur(err).slice(0, 160)}`)
+        court = undefined
+      }
+    }
     let livres = 0
     for (const d of destinataires) {
       const chat = Number(d.telegram_id)
       if (!Number.isSafeInteger(chat) || chat <= 0) continue
-      const pourMelanie = estMelanie(d.libelle)
-      if (pourMelanie && !court) continue
-      const aEnvoyer = pourMelanie && court ? decouperResume(court.texte) : messages
+      const pourMelanie = court !== undefined && estMelanie(d.libelle)
+      if (pourMelanie && court === null) continue
+      const aEnvoyer = pourMelanie && court ? court.messages : messages
       let tout = true
       for (const m of aEnvoyer) {
         const ok = await tgCockpit('sendMessage', { chat_id: chat, text: m, link_preview_options: { is_disabled: true } })

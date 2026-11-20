@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client'
 import type Anthropic from '@anthropic-ai/sdk'
 import { prisma } from '@/lib/db'
 import { boucleAgent, type ReponseAgent } from '@/lib/agent-cockpit'
-import { auteurDemande, libelleBoutonConfirmer } from '@/lib/agent-cockpit-pur'
+import { auteurDemande, libelleBoutonConfirmer, messageRenvoye } from '@/lib/agent-cockpit-pur'
 import { validerAction, executerAction, RefusAction, expurgerLiensInvitation, paramsPourLog } from '@/lib/stripe-actions'
 import {
   DUREE_TOUR_DEFAUT_MS, GRACE_FILET_MS, MAX_OCTETS_IMAGE, MAX_OCTETS_VOCAL, MAX_TEXTE_TOUR_VOCAL, MAX_TRANSCRIPTION,
@@ -788,6 +788,12 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
     signal: controleur.signal,
     // (29/10) Securite des bots : qui parle, et la prudence du tour.
     texteTitulaire: analyse.suspect ? rendreVisible(parts.titulaire) : parts.titulaire,
+    // (20/11, cas de Tony) Le meme message renvoye mot pour mot dans les 30
+    // minutes : compare au texte REEL du tour (jamais texteModele, que la note
+    // des demandes en suspens precede), sans image ni piece.
+    renvoi: messageRenvoye(ecrite[0].messages, {
+      avantId: idTour, texte: texteGarde, le: debut, piece: !!piece || !!image, reprise: !!e.reprise,
+    }),
     derniereReponse,
     chatId,
     prudence: analyse.suspect ? analyse : null,

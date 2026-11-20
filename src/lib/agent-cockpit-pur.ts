@@ -53,39 +53,71 @@ export function estMelanie(qui: string | null | undefined): boolean {
 /** En dessous, un renvoi (« oui », « ok », « merci ») n'est pas une demande repetee. */
 export const LONGUEUR_MIN_RENVOI = 12
 
-/** Le texte d'un message de l'historique (chaine, ou blocs texte joints) ; null sans texte. */
-export function texteDuMessage(content: unknown): string | null {
-  if (typeof content === 'string') return content
-  if (!Array.isArray(content)) return null
-  const t = content
-    .map(b => (b && typeof b === 'object' && (b as { type?: unknown }).type === 'text' ? String((b as { text?: unknown }).text ?? '') : ''))
-    .filter(Boolean).join('\n')
-  return t || null
-}
+/** Au-dela, la meme question n'est plus un renvoi (posee hier, reposee aujourd'hui). */
+export const FENETRE_RENVOI_MS = 30 * 60 * 1000
+
+/**
+ * Les textes qui ne sont pas des mots de l'interlocuteur : traces d'une image
+ * ou d'un vocal (agent-cockpit-telegram-pur.ts, TRACE_IMAGE...), texte par
+ * defaut d'un document envoye sans un mot (route web du cockpit). Recopies ici :
+ * ce fichier n'importe rien.
+ */
+export const TRACES_SANS_MOTS: readonly string[] = [
+  '[image envoyée]', "[image envoyée, une photo d'un album]", 'Regarde ce document et dis-moi ce que tu y vois.',
+]
 
 /** Mêmes mots, a la casse et aux espaces pres. */
 export function normaliserRenvoi(t: string): string {
   return t.normalize('NFC').toLowerCase().replace(/\s+/g, ' ').trim()
 }
 
+/** Un texte qui peut etre compare : assez long, et pas une trace (« [image envoyée] », « [pièce jointe : ...] »...). */
+function texteComparable(t: unknown): string | null {
+  if (typeof t !== 'string') return null
+  const n = normaliserRenvoi(t)
+  if (n.length < LONGUEUR_MIN_RENVOI || n.startsWith('[')) return null
+  if (TRACES_SANS_MOTS.some(x => normaliserRenvoi(x) === n)) return null
+  return n
+}
+
 /**
- * Le dernier message de l'interlocuteur est-il identique (a la casse et aux
- * espaces pres) a son message precedent ? Les lignes « [système] » (alertes,
- * resume du matin) et les messages sans texte (resultats d'outils) sont
- * sautees ; il faut une reponse de l'agent entre les deux.
+ * Le message du tour est-il identique (a la casse et aux espaces pres) au
+ * message precedent du meme interlocuteur, envoye il y a moins de 30 minutes,
+ * avec une reponse de l'agent entre les deux ? Lu dans les messages STOCKES
+ * du fil Telegram (cockpit_agent_conversations : role, content, id, le,
+ * piece), avant la question du tour (`avantId`), et compare au texte REEL du
+ * tour (jamais celui que le serveur a precede d'une note « [système] »).
+ * Jamais vrai : avec une image ou une piece (d'un cote ou de l'autre), pour
+ * une trace sans mots, sans horodatage, ni pour une reprise. Les lignes
+ * « [système] » (alertes, resume du matin) sont sautees.
  */
-export function messageRenvoye(historique: readonly { role?: unknown; content?: unknown }[]): boolean {
-  const vus: string[] = []
-  let reponseEntre = false
-  for (let i = historique.length - 1; i >= 0 && vus.length < 2; i--) {
-    const m = historique[i]
-    if (m?.role === 'assistant') { if (vus.length === 1) reponseEntre = true; continue }
-    if (m?.role !== 'user') continue
-    const t = texteDuMessage(m.content)
-    if (!t || t.trim().startsWith('[système]')) continue
-    vus.push(normaliserRenvoi(t))
+export function messageRenvoye(
+  stockes: unknown,
+  tour: { avantId: string; texte: string; le: number; piece: boolean; reprise?: boolean },
+): boolean {
+  if (tour.piece || tour.reprise || !Number.isFinite(tour.le)) return false
+  const actuel = texteComparable(tour.texte)
+  if (!actuel) return false
+  const liste = Array.isArray(stockes) ? stockes : []
+  let fin = liste.length
+  for (let i = liste.length - 1; i >= 0; i--) {
+    const e = liste[i] as { id?: unknown } | null
+    if (e && typeof e === 'object' && e.id === tour.avantId) { fin = i; break }
   }
-  return vus.length === 2 && reponseEntre && vus[0].length >= LONGUEUR_MIN_RENVOI && vus[0] === vus[1]
+  let reponseEntre = false
+  for (let i = fin - 1; i >= 0; i--) {
+    const m = liste[i] as { role?: unknown; content?: unknown; le?: unknown; piece?: unknown } | null
+    if (!m || typeof m !== 'object') continue
+    if (m.role === 'assistant') { reponseEntre = true; continue }
+    if (m.role !== 'user' || typeof m.content !== 'string' || !m.content.trim()) continue
+    if (m.content.trim().startsWith('[système]')) continue
+    // Le message precedent de l'interlocuteur : on s'arrete a lui.
+    if (!reponseEntre || m.piece) return false
+    const le = typeof m.le === 'string' ? Date.parse(m.le) : NaN
+    if (!Number.isFinite(le) || tour.le - le < 0 || tour.le - le > FENETRE_RENVOI_MS) return false
+    return texteComparable(m.content) === actuel
+  }
+  return false
 }
 
 /** La note ajoutee au systeme pour ce tour quand messageRenvoye est vrai. */

@@ -9,7 +9,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { CONSIGNE_MESSAGE_RENVOYE, LONGUEUR_MIN_RENVOI, messageRenvoye, texteDuMessage } from '../src/lib/agent-cockpit-pur.ts'
+import { CONSIGNE_MESSAGE_RENVOYE, FENETRE_RENVOI_MS, LONGUEUR_MIN_RENVOI, TRACES_SANS_MOTS, messageRenvoye } from '../src/lib/agent-cockpit-pur.ts'
+import { TRACE_IMAGE, TRACE_IMAGE_ALBUM } from '../src/lib/agent-cockpit-telegram-pur.ts'
 import {
   DEBUT_RESTE_A_CONTACTER, MARQUEUR_RESUME_HISTORIQUE, MAX_A_CONTACTER_COURT, RUBRIQUES_ACTION,
   composerResume, composerResumeCourt, entreesHistoriqueResume, ligneRelances,
@@ -43,41 +44,59 @@ test('1b : la consigne interdit de demander un numero de compte et propose un ca
 // --- 1c. Message renvoye a l'identique ---------------------------------------------
 
 const DEMANDE = "Montana@exemple.fr Tu peux l'ajouter au groupe il etait entre depuis le debut"
-test('1c : meme message, a la casse et aux espaces pres, apres une reponse = renvoye', () => {
-  assert.equal(messageRenvoye([
-    { role: 'user', content: DEMANDE },
-    { role: 'assistant', content: 'Il me faut son compte Telegram.' },
-    { role: 'user', content: `  ${DEMANDE.toUpperCase().replace(/ /g, '   ')} ` },
-  ]), true)
+// Les messages STOCKES du fil Telegram (cockpit_agent_conversations), puis le tour.
+const T = Date.UTC(2026, 10, 17, 18, 0)
+const iso = (ms) => new Date(ms).toISOString()
+const fil = (texte, le, extra = {}) => [
+  { role: 'user', content: texte, id: 'u1', le: iso(le), ...extra },
+  { role: 'assistant', content: 'Il me faut son compte Telegram.', id: 'r1' },
+]
+const tour = (texte, le, extra = {}) => ({ avantId: 'u2', texte, le, piece: false, ...extra })
+const avecTour = (stockes, texte) => [...stockes, { role: 'user', content: texte, id: 'u2' }]
+
+test('1c : meme message, a la casse et aux espaces pres, dans les 30 minutes, apres une reponse = renvoye', () => {
+  const t2 = `  ${DEMANDE.toUpperCase().replace(/ /g, '   ')} `
+  assert.equal(messageRenvoye(avecTour(fil(DEMANDE, T), t2), tour(t2, T + 5 * 60_000)), true)
+  // La question du tour peut etre deja ecrite apres (avantId) : elle n'est pas comparee a elle-meme.
+  assert.equal(messageRenvoye(fil(DEMANDE, T), tour(DEMANDE, T + 60_000)), true)
 })
-test('1c : les lignes [système] et les blocs texte sont pris en compte', () => {
-  assert.equal(messageRenvoye([
-    { role: 'user', content: [{ type: 'text', text: DEMANDE }] },
-    { role: 'assistant', content: 'Question ?' },
-    { role: 'user', content: "[système] Alerte du support (un membre demande un humain...)" },
-    { role: 'assistant', content: 'Un membre demande un humain.' },
-    { role: 'user', content: DEMANDE },
-  ]), true)
-  assert.equal(texteDuMessage([{ type: 'tool_result', content: 'x' }]), null)
+test('1c : au-dela de 30 minutes, ou sans horodatage = non', () => {
+  assert.equal(messageRenvoye(fil(DEMANDE, T), tour(DEMANDE, T + FENETRE_RENVOI_MS + 1)), false)
+  const sansLe = [{ role: 'user', content: DEMANDE, id: 'u1' }, { role: 'assistant', content: 'Q ?' }]
+  assert.equal(messageRenvoye(sansLe, tour(DEMANDE, T)), false)
+  assert.equal(messageRenvoye(fil(DEMANDE, T), tour(DEMANDE, NaN)), false)
 })
-test('1c : un message different, un « oui » repete, ou deux messages sans reponse entre = non', () => {
-  assert.equal(messageRenvoye([
-    { role: 'user', content: DEMANDE }, { role: 'assistant', content: 'Q ?' }, { role: 'user', content: `${DEMANDE} merci` },
-  ]), false)
+test('1c : images, pieces et traces sans mots = non', () => {
+  for (const trace of [TRACE_IMAGE, TRACE_IMAGE_ALBUM, ...TRACES_SANS_MOTS, '[pièce jointe : releve.pdf]']) {
+    assert.equal(messageRenvoye(fil(trace, T), tour(trace, T + 60_000)), false, trace)
+  }
+  assert.ok(TRACES_SANS_MOTS.includes(TRACE_IMAGE) && TRACES_SANS_MOTS.includes(TRACE_IMAGE_ALBUM))
+  assert.equal(messageRenvoye(fil(DEMANDE, T), tour(DEMANDE, T + 60_000, { piece: true })), false)
+  assert.equal(messageRenvoye(fil(DEMANDE, T, { piece: { type: 'photo' } }), tour(DEMANDE, T + 60_000)), false)
+  assert.equal(messageRenvoye(fil(DEMANDE, T), tour(DEMANDE, T + 60_000, { reprise: true })), false)
+})
+test('1c : lignes [système] sautees ; message different, « oui » repete, ou sans reponse entre = non', () => {
+  const avecAlerte = [...fil(DEMANDE, T),
+    { role: 'user', content: '[système] Alerte du support (un membre demande un humain...)', id: 'h1' },
+    { role: 'assistant', content: 'Un membre demande un humain.', id: 'h1-texte' }]
+  assert.equal(messageRenvoye(avecAlerte, tour(DEMANDE, T + 60_000)), true)
+  assert.equal(messageRenvoye(fil(DEMANDE, T), tour(`${DEMANDE} merci`, T + 60_000)), false)
   assert.ok('oui'.length < LONGUEUR_MIN_RENVOI)
-  assert.equal(messageRenvoye([
-    { role: 'user', content: 'oui' }, { role: 'assistant', content: 'Q ?' }, { role: 'user', content: 'Oui' },
-  ]), false)
-  assert.equal(messageRenvoye([{ role: 'user', content: DEMANDE }, { role: 'user', content: DEMANDE }]), false)
-  assert.equal(messageRenvoye([{ role: 'user', content: DEMANDE }]), false)
-  assert.equal(messageRenvoye([]), false)
+  assert.equal(messageRenvoye(fil('oui', T), tour('Oui', T + 60_000)), false)
+  assert.equal(messageRenvoye([{ role: 'user', content: DEMANDE, id: 'u1', le: iso(T) }], tour(DEMANDE, T + 60_000)), false)
+  assert.equal(messageRenvoye([], tour(DEMANDE, T)), false)
+  assert.equal(messageRenvoye(null, tour(DEMANDE, T)), false)
 })
-test('1c : la note au modele part dans boucleAgent, sans appel en plus', () => {
+const TG = lire('src/lib/agent-cockpit-telegram.ts')
+test('1c : le canal Telegram compare le texte REEL du tour, la boucle pose la note', () => {
   assert.ok(SOBRE(CONSIGNE_MESSAGE_RENVOYE))
   assert.match(CONSIGNE_MESSAGE_RENVOYE, /Ne repose pas la même question/)
   assert.match(CONSIGNE_MESSAGE_RENVOYE, /UNE seule option/)
+  assert.match(TG, /renvoi: messageRenvoye\(ecrite\[0\]\.messages, \{\s*avantId: idTour, texte: texteGarde, le: debut, piece: !!piece \|\| !!image, reprise: !!e\.reprise,\s*\}\)/)
   const boucle = AGENT.slice(AGENT.indexOf('export async function boucleAgent('))
-  assert.match(boucle, /if \(messageRenvoye\(historique\)\) systeme\.push\(\{ type: 'text', text: CONSIGNE_MESSAGE_RENVOYE \}\)/)
+  assert.match(boucle, /if \(canal\.renvoi === true\) systeme\.push\(\{ type: 'text', text: CONSIGNE_MESSAGE_RENVOYE \}\)/)
+  // La fenetre du cockpit (route web) ne passe pas renvoi : rien n'y est signale.
+  assert.doesNotMatch(lire('src/app/api/cockpit/agent/route.ts'), /\brenvoi:|messageRenvoye/)
 })
 
 // --- A. Deux echanges au plus -------------------------------------------------------
@@ -99,7 +118,9 @@ test('B : montant = prix du tarif, montant_paye = reellement paye ; la regle de 
   assert.match(AGENT, /montant \(PRIX DU TARIF, avant remise\), montant_paye \(ce que l'abonnement paie RÉELLEMENT/)
   assert.match(AGENT, /remise_code .*remise .*remise_fin/)
   assert.match(AGENT, /« COMBIEN DE MEMBRES À X € »/)
-  assert.match(AGENT, /Compte sur montant_paye = X \(abonnements vivants, hors pause\), jamais sur montant/)
+  assert.match(AGENT, /Compte sur montant_paye = X \(abonnements actifs, hors pause\), jamais sur montant/)
+  assert.match(AGENT, /montant_paye est le prix par PÉRIODE \(periodicite\) après la remise en cours : un trimestriel à 267 € n'est pas « à 89 € »/)
+  assert.match(AGENT, /Les essais \(trialing\), les impayés \(past_due, unpaid\) et les pauses se disent aussi à part/)
   assert.match(AGENT, /montant = X et montant_paye < X/)
 })
 
@@ -166,11 +187,14 @@ test('2 : « À contacter » plafonne a 5 lignes, le reste garde pour « la suit
   // L'agent sait servir « la suite ».
   assert.match(AGENT, /Quand elle dit « la suite » sous ce résumé, donne-lui les lignes gardées/)
 })
-test('2 : resume.ts envoie la version courte a Melanie seulement, Brice garde la complete', () => {
+test('2 : resume.ts : interrupteur desactive, version courte pour Melanie seulement, erreur = version complete', () => {
+  assert.match(RESUME, /^export const RESUME_COURT_MELANIE = false$/m)
   assert.match(RESUME, /select telegram_id, libelle from public\.cockpit_telegram_comptes where diffusion = 'equipe'/)
-  assert.match(RESUME, /const pourMelanie = estMelanie\(d\.libelle\)/)
-  assert.match(RESUME, /if \(pourMelanie && !court\) continue/)
-  assert.match(RESUME, /const aEnvoyer = pourMelanie && court \? decouperResume\(court\.texte\) : messages/)
+  assert.match(RESUME, /if \(RESUME_COURT_MELANIE\) \{\s*try \{\s*const c = composerResumeCourt\(/)
+  assert.match(RESUME, /\} catch \(err\) \{\s*console\.warn\(`\[liveclub\/resume\] version courte impossible, version complete pour tous[^`]*`\)\s*court = undefined/)
+  assert.match(RESUME, /const pourMelanie = court !== undefined && estMelanie\(d\.libelle\)/)
+  assert.match(RESUME, /if \(pourMelanie && court === null\) continue/)
+  assert.match(RESUME, /const aEnvoyer = pourMelanie && court \? court\.messages : messages/)
   assert.match(RESUME, /entreesHistoriqueResume\(court\.texte, jour, court\.reste\)/)
   assert.match(RESUME, /rubrique: 'contacter', qui: `m\$\{m\.membreId\}`, quand: jusqua\.toISOString\(\), detail, relais \}/)
 })
@@ -188,12 +212,14 @@ test('3 : la ligne posee par la route est celle que lit alerteAutorisee', () => 
   assert.equal(S.alerteAutorisee(fil, T0 + 10 * 60_000), true)
   assert.equal(S.ligneEquipePrevenue('x').content, `${S.PREFIXE_SYSTEME}${S.LIGNE_EQUIPE_PREVENUE}`)
 })
-test('3 : la route du site verifie avant l email et le Telegram, et pose la ligne avant l envoi', () => {
+test('3 : la route du site verifie avant l email et le Telegram, et ne pose la ligne qu apres un envoi reussi', () => {
   const iAutorise = ESCALADE.indexOf('alerteAutorisee(thread.messages, Date.now())')
-  const iLigne = ESCALADE.indexOf('ligneEquipePrevenue(new Date().toISOString())')
   const iEmail = ESCALADE.indexOf('resend.emails.send(')
   const iTelegram = ESCALADE.indexOf('alerterEquipeTelegram({')
-  assert.ok(iAutorise > 0 && iAutorise < iLigne && iLigne < iEmail && iEmail < iTelegram)
+  const iCondition = ESCALADE.indexOf('if (!dejaPrevenue && notified) {')
+  const iLigne = ESCALADE.indexOf('ligneEquipePrevenue(new Date().toISOString())')
+  assert.ok(iAutorise > 0 && iAutorise < iEmail && iEmail < iTelegram && iTelegram < iCondition && iCondition < iLigne)
+  assert.equal(ESCALADE.split('ligneEquipePrevenue(').length - 1, 1, 'une seule pose de la ligne')
   assert.match(ESCALADE, /const apiKey = dejaPrevenue \? undefined :/)
   assert.match(ESCALADE, /if \(!dejaPrevenue\) try \{/)
   assert.match(ESCALADE, /let notified = dejaPrevenue/)

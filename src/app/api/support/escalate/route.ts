@@ -95,19 +95,10 @@ export async function POST(req: NextRequest) {
   // (20/11, alertes en triple du 11/11) Au plus une alerte par fil toutes les
   // 10 minutes, la meme regle que le bot des membres (alerteAutorisee,
   // support-pont-pur.ts) : la ligne « [système] Équipe prévenue » date la
-  // derniere. Elle est posee AVANT l'envoi, pour qu'un second appel proche la
-  // voie. Deja prevenue : ni email ni Telegram, et le widget lit notified = true.
+  // derniere. Elle n'est posee qu'APRES un envoi reussi (email ou Telegram) :
+  // si rien n'est parti, un nouvel essai pourra prevenir l'equipe. Deja
+  // prevenue : ni email ni Telegram, et le widget lit notified = true.
   const dejaPrevenue = !alerteAutorisee(thread.messages, Date.now())
-  if (!dejaPrevenue) {
-    try {
-      await prisma.$executeRaw`
-        update public."SupportThread"
-        set messages = coalesce(messages, '[]'::jsonb) || ${JSON.stringify([ligneEquipePrevenue(new Date().toISOString())])}::jsonb
-        where id = ${thread.id}`
-    } catch (err) {
-      console.error('[support/escalate] ligne equipe prevenue non posee:', err)
-    }
-  }
 
   let notified = dejaPrevenue
   const apiKey = dejaPrevenue ? undefined : process.env.RESEND_API_KEY_SUPPORT ?? process.env.RESEND_API_KEY
@@ -174,6 +165,18 @@ export async function POST(req: NextRequest) {
     if (livres > 0) notified = true
   } catch (err) {
     console.error('[support/escalate] alerte Telegram impossible:', err)
+  }
+
+  // La ligne qui date l'alerte, seulement si au moins un canal a prevenu l'equipe.
+  if (!dejaPrevenue && notified) {
+    try {
+      await prisma.$executeRaw`
+        update public."SupportThread"
+        set messages = coalesce(messages, '[]'::jsonb) || ${JSON.stringify([ligneEquipePrevenue(new Date().toISOString())])}::jsonb
+        where id = ${thread.id}`
+    } catch (err) {
+      console.error('[support/escalate] ligne equipe prevenue non posee:', err)
+    }
   }
 
   // `email` reste pour les clients v1 (mailto de secours quand notified=false).
