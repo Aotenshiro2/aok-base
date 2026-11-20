@@ -3,7 +3,7 @@
 
 import { prisma } from '@/lib/db'
 import { droitsAcademie } from './droits'
-import { lireTarif, membreDuModule, prixMembre, tarifPossible, type PrixCalcule, type TarifMembre } from './prix-membre-pur'
+import { lireTarif, membreDuTarif, prixMembre, tarifPossible, type PrixCalcule, type TarifMembre } from './prix-membre-pur'
 import type { Droits } from './pur'
 import { SQL_TARIFS_MEMBRES } from './requetes'
 
@@ -35,7 +35,8 @@ export async function prixDuCompte(p: {
   if (!tarifPossible(p.offre, tarifs, quand)) return courant
   const droits = p.droits ?? (await droitsAcademie(p.userId))
   const moduleId = tarifs.find(t => t.moduleId)?.moduleId ?? null
-  const calcul = prixMembre({ offre: p.offre, prixCourantEur: p.prixCourantEur, membre: membreDuModule(droits, moduleId), tarifs, quand })
+  // (20/11/2026) Une regle par tarif : une partie garde celle de la partie 2, un module entier demande le Live Club actif.
+  const calcul = prixMembre({ offre: p.offre, prixCourantEur: p.prixCourantEur, membre: membreDuTarif(droits, p.offre, moduleId), tarifs, quand })
   // incertain : un tarif vaut, mais le Live Club du compte est illisible (Stripe) ; il compte alors comme non membre.
   return { ...calcul, incertain: !calcul.tarif && droits.liveClub === 'inconnu' }
 }

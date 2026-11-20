@@ -67,6 +67,24 @@ export function membreDuModule(d: Pick<Droits, 'liveClub' | 'ouvertures'>, modul
   return d.ouvertures.some(o => o.raison === 'liveclub' && o.siLiveClub && !o.cible.tout && o.cible.moduleId === moduleId)
 }
 
+/** Une offre vendue qui est une PARTIE d'un module (« module-<module>-partie-<n> »), comme achat-pur.ts (offrePartie). */
+const OFFRE_DE_PARTIE = /^module-[a-z0-9]+(?:-[a-z0-9]+)*-partie-[1-9][0-9]?$/
+
+/**
+ * (20/11/2026, modules au Black Friday) Qui a droit au tarif membre d'une
+ * offre, une regle par tarif selon l'offre vendue :
+ * - une PARTIE d'un module (la partie 2 de Smart Money Technique) : la regle
+ *   de la partie 2, inchangee (membreDuModule : le Live Club ouvre une partie
+ *   de ce module, et il est actif) ;
+ * - un module ENTIER (les 7 modules vendus a l'unite) : le Live Club actif
+ *   seulement (droits.liveClub 'oui' ; l'equipe l'a toujours).
+ * 'inconnu' (Stripe illisible), 'non' ou 'non_lu' : pas membre, prix courant.
+ */
+export function membreDuTarif(d: Pick<Droits, 'liveClub' | 'ouvertures'>, offre: string, moduleId: string | null): boolean {
+  if (OFFRE_DE_PARTIE.test(offre)) return membreDuModule(d, moduleId)
+  return d.liveClub === 'oui'
+}
+
 export type PrixCalcule = {
   /** Ce que le serveur facture. */
   prixEur: number

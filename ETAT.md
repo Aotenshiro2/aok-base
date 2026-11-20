@@ -16,6 +16,17 @@
   posee seulement apres un envoi reussi, email ou Telegram).
 - Verif : node scripts/verifier-frictions-melanie.mjs (14 blocs).
 
+## LES 7 MODULES VENDUS A L'UNITE A MOITIE PRIX POUR LES MEMBRES DU LIVE CLUB, AU BLACK FRIDAY (20/11/2026, brief de l'Orchestre Prix sur le oui de Brice, commite NON pousse, branche modules-membres-bf ; aucune migration (celle de la partie 2 suffit) ; RIEN cree en base ni chez Stripe)
+
+- Meme mecanisme que la partie 2 : une offre de tarif « module-<slug>-membres-bf » sans contenu, fenetre
+  2026-11-26T23:00:00Z au 2026-11-30T22:59:59Z, lue par SQL_TARIFS_MEMBRES. Rapport, SQL des 7 offres et 7 prix Stripe :
+  D:\6_Societe\Pilotage\Data-Performance\prix\2026-11-modules-membres-bf-rapport.md
+- Qui y a droit : membreDuTarif (prix-membre-pur.ts), une regle par tarif. Une PARTIE garde la regle de la partie 2
+  (membreDuModule) ; un module ENTIER demande le Live Club actif seulement. Illisible : prix courant.
+- La carte (/api/academie/achat) applique aussi le tarif au module entier (offreEnVente rend prix_eur). PayPal : rien
+  (seule la partie 2 a une referenceMembre). /moi : offres[].tarif sur l'offre « module-<slug> ».
+- Test : scripts/verifier-modules-membres-bf.mjs (9 blocs).
+
 ## DEPOTS BROKER : LA DEVISE EST GARDEE, LE 70/30 SUR LES EUROS RECUS (20/11/2026, decision de Brice du 12/11, option A ; commite NON pousse, branche devise-depots ; migration NON appliquee)
 
 - Cause : rapport D:\6_Societe\Pilotage\Data-Performance\agent-cockpit\rapport-2026-11-12.md (721 USD convertis a la main par Melanie).

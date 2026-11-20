@@ -274,7 +274,9 @@ bloc('code : les routes passent par prixDuCompte, le tarif n ouvre rien et ne se
   assert.match(capture, /quand: lu\.commande\.creeLe/)
   assert.match(capture, /if \(lu\.commande\.membre\)/)
   const moi = lire('../src/app/api/academie/moi/route.ts')
-  assert.match(moi, /membreDuModule\(droits, m\.id\)/)
+  // (20/11/2026, lot des modules) /moi passe par membreDuTarif, qui rend membreDuModule pour une partie
+  // (verifier-modules-membres-bf.mjs le prouve sur la partie 2).
+  assert.match(moi, /membreDuTarif\(droits, o\.slug, m\.id\)/)
   const catalogue = lire('../src/app/api/academie/catalogue/route.ts')
   assert.doesNotMatch(catalogue, /tarif/i, 'le catalogue public ne montre aucun tarif')
   const sql = lire('../src/lib/academie/requetes.ts')

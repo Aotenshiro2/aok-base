@@ -92,12 +92,16 @@ export async function appeler(cle: string, chemin: string, corps?: URLSearchPara
 // Creation de la session
 // ---------------------------------------------------------------------------
 
-export async function offreEnVente(slug: string): Promise<OffreEnVente | null> {
+export async function offreEnVente(slug: string): Promise<(OffreEnVente & { prixEur: number }) | null> {
   const l = (await prisma.$queryRawUnsafe<{
-    module_slug: string; module_titre: string; offre_slug: string; stripe_price_id: string
+    module_slug: string; module_titre: string; offre_slug: string; stripe_price_id: string; prix_eur: number | string
   }[]>(SQL_OFFRE_EN_VENTE, slug))[0]
   if (!l) return null
-  return { moduleSlug: l.module_slug, moduleTitre: l.module_titre, offreSlug: l.offre_slug, stripePriceId: l.stripe_price_id }
+  return {
+    moduleSlug: l.module_slug, moduleTitre: l.module_titre, offreSlug: l.offre_slug, stripePriceId: l.stripe_price_id,
+    // (20/11/2026) Le prix courant du module : la base du prix membre (prixDuCompte, prix-membre.ts).
+    prixEur: Number(l.prix_eur),
+  }
 }
 
 /**

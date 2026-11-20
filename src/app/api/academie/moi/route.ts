@@ -12,7 +12,7 @@ import { noterConnexion, progressionDuCompte, type ProgressionLecon } from '@/li
 import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
 import { soutienDuCompte, type SoutienDuCompte } from '@/lib/soutien'
 import { lireTarifsMembres } from '@/lib/academie/prix-membre'
-import { membreDuModule, prixMembre, tarifPossible, vueTarif, type TarifMembre } from '@/lib/academie/prix-membre-pur'
+import { membreDuTarif, prixMembre, tarifPossible, vueTarif, type TarifMembre } from '@/lib/academie/prix-membre-pur'
 
 /**
  * GET /api/academie/moi : tout ce dont les ecrans de l'academie ont besoin,
@@ -67,7 +67,9 @@ import { membreDuModule, prixMembre, tarifPossible, vueTarif, type TarifMembre }
  *                                           tarif (20/11/2026, absent sinon) : { prix_eur, prix_courant_eur,
  *                                           fin_le } quand CE compte, membre du Live Club, a un tarif membre
  *                                           en cours sur l'offre (Black Friday : la partie 2 a 250 au lieu
- *                                           de 850 jusqu'au 30/11 23:59:59 Paris). Le journal facture le sien.
+ *                                           de 850 jusqu'au 30/11 23:59:59 Paris ; les 7 modules vendus a
+ *                                           l'unite a moitie prix, Live Club actif seulement : membreDuTarif).
+ *                                           Le journal facture le sien.
  *                 acces: entier | partiel | ferme | inconnu, raisons,
  *                 progression: { lecons, vues, en_cours, ouvertes, commencees, pourcentage },
  *                           pourcentage = part des lecons ACCESSIBLES a l'eleve a l'etat 'vu'
@@ -197,7 +199,7 @@ export async function GET(req: NextRequest) {
     sections: m.sections.map(s => ({ ...s, skool: reperePublic(reperes?.get(`section:${s.id}`)) })),
     offres: m.offres.map(o => {
       if (!tarifs.length || typeof o.prix_eur !== 'number' || !tarifPossible(o.slug, tarifs, maintenant)) return o
-      const calcul = prixMembre({ offre: o.slug, prixCourantEur: o.prix_eur, membre: membreDuModule(droits, m.id), tarifs, quand: maintenant })
+      const calcul = prixMembre({ offre: o.slug, prixCourantEur: o.prix_eur, membre: membreDuTarif(droits, o.slug, m.id), tarifs, quand: maintenant })
       const tarif = vueTarif(calcul)
       return tarif ? { ...o, tarif } : o
     }),

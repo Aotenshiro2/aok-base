@@ -25,8 +25,9 @@ import { messageErreur } from '@/lib/liveclub/pur'
  * seulement) ; le prix facture est celui de son stripe_price_id, jamais une
  * valeur de la page. Sans offre : le module entier, comme avant.
  *
- * Tarif membre (20/11/2026, Black Friday) : une partie achetee par un compte
- * connecte membre du Live Club, dans la fenetre d'un tarif en base
+ * Tarif membre (20/11/2026, Black Friday) : une partie (ou un module entier,
+ * meme jour : les 7 modules vendus a l'unite) achetee par un compte
+ * connecte membre du Live Club (membreDuTarif), dans la fenetre d'un tarif en base
  * (SQL_TARIFS_MEMBRES), se paie au stripe_price_id du tarif (prixDuCompte,
  * prix-membre.ts) ; la session expire au plus tard a la fin de la fenetre
  * (31 min au moins, minimum de Stripe). Le webhook ouvre l'offre de la partie.
@@ -79,7 +80,7 @@ export async function POST(req: NextRequest) {
     email = null
   }
 
-  // prixEur : le prix courant d'une partie (offrePartieEnVente), base du tarif membre ; absent pour le module entier.
+  // prixEur : le prix courant de l'offre vendue (une partie ou, depuis le 20/11, le module entier), base du tarif membre.
   let offre: (OffreEnVente & { prixEur?: number }) | null
   try {
     offre = partie ? await offrePartieEnVente(slug, partie) : await offreEnVente(slug)
@@ -90,11 +91,12 @@ export async function POST(req: NextRequest) {
   if (!offre) return refus('module', 404)
   const prixCourant = typeof offre.prixEur === 'number' && Number.isFinite(offre.prixEur) ? offre.prixEur : null
 
-  // (20/11/2026) Le tarif membre d'une partie (prix-membre-pur.ts, le seul calcul) : un membre du Live Club, dans la
-  // fenetre du tarif en base, paie son stripe_price_id. Sinon, ou si la base ou ses droits sont illisibles : le prix
-  // courant (Checkout affiche le montant avant le paiement). La page n'envoie jamais de prix.
+  // (20/11/2026) Le tarif membre d'une partie ou d'un module entier (prix-membre-pur.ts, le seul calcul ; qui y a droit :
+  // membreDuTarif) : un membre du Live Club, dans la fenetre du tarif en base, paie son stripe_price_id. Sans tarif en
+  // base pour l'offre, ou si la base ou ses droits sont illisibles : le prix courant (Checkout affiche le montant avant
+  // le paiement). La page n'envoie jamais de prix.
   let expiresAt: number | null = null
-  if (partie && userId && prixCourant !== null && prixCourant > 0) {
+  if (userId && prixCourant !== null && prixCourant > 0) {
     const maintenant = new Date()
     try {
       const calcul = await prixDuCompte({ userId, offre: offre.offreSlug, prixCourantEur: prixCourant, quand: maintenant })
@@ -103,7 +105,7 @@ export async function POST(req: NextRequest) {
         expiresAt = expirationSession(calcul.tarif.fin, maintenant)
       }
     } catch (err) {
-      console.warn(`[academie/achat] tarif membre illisible, prix courant offre=${partie} : ${messageErreur(err)}`)
+      console.warn(`[academie/achat] tarif membre illisible, prix courant offre=${offre.offreSlug} : ${messageErreur(err)}`)
     }
   }
 

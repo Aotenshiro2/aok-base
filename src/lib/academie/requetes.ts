@@ -490,9 +490,11 @@ returning a.id::text as acces_id, a.retire_le
  * $1 = slug du module. L'offre « module-<slug> » si le module se vend seul
  * chez Stripe Ao Knowledge : module publie, offre de type module, canal
  * stripe_aok, prix et stripe_price_id poses. Aucune ligne = pas en vente.
+ * prix_eur (20/11/2026) : le prix courant de l'offre, base du tarif membre (prix-membre.ts).
  */
 export const SQL_OFFRE_EN_VENTE = `
-select m.slug as module_slug, m.titre as module_titre, o.slug as offre_slug, o.stripe_price_id
+select m.slug as module_slug, m.titre as module_titre, o.slug as offre_slug, o.stripe_price_id,
+       o.prix_eur::float8 as prix_eur
   from public.academie_modules m
   join public.academie_offres o on o.slug = 'module-' || m.slug
  where m.slug = $1::text and m.statut = 'publie'
