@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import type Anthropic from '@anthropic-ai/sdk'
 import { prisma } from '@/lib/db'
 import { boucleAgent, type ReponseAgent } from '@/lib/agent-cockpit'
+import { traceLectureImage, type TraceOutil } from '@/lib/agent-outils-trace-pur'
 import { auteurDemande, libelleBoutonConfirmer, messageRenvoye } from '@/lib/agent-cockpit-pur'
 import { validerAction, executerAction, RefusAction, expurgerLiensInvitation, paramsPourLog } from '@/lib/stripe-actions'
 import {
@@ -53,6 +54,8 @@ import { lireBoutonProposition } from '@/lib/tab/repondre-pur'
 // du bot QUI a recu le message (un file_id ne vaut que pour son bot), et part
 // au modele en bloc image dans le tour courant SEULEMENT. L'historique n'en
 // garde que la trace « [image envoyée] » et la legende, jamais le base64.
+// (21/11, cas de Melanie) Plus, sous la reponse du tour, le texte que l'agent
+// y a lu (ReponseAgent.luImage, borne) : la relance porte sur la meme liste.
 //
 // VOCAUX (Brice, 31/10) : un message vocal ou un fichier audio est transcrit
 // (transcrireVocalTelegram, Groq) puis traite comme un message ECRIT de la
@@ -197,6 +200,8 @@ type MessageStocke = {
   questionEquipe?: QuestionEquipe
   /** (29/10) La question d'equipe que cette ligne ferme (reponse rapportee). */
   rapportQuestion?: string
+  /** (21/11) La trace des appels d'outils du tour (jamais relue par le modele : messagesPourModele ne garde que role et content). */
+  outils?: TraceOutil[]
 }
 
 type LigneConversation = {
@@ -960,12 +965,19 @@ type ContexteLivraison = {
  */
 async function livrerReponse(c: ContexteLivraison, reponse: ReponseAgent, replyHistorique: string = reponse.reply): Promise<void> {
   const { chatId, telegramId, updateId, majUpdate, garde } = c
+  // (21/11) Le texte lu dans l'image du tour, sous la reponse, pour les tours suivants.
+  if (reponse.luImage) replyHistorique = `${replyHistorique}\n\n${traceLectureImage(reponse.luImage)}`
   // La reponse de ce tour, seule (la question est deja en base). Un rejeu
   // Telegram du MEME update s'est arrete a l'ecriture de la question ; la
   // clause where de chaque upsert reste en ceinture. (29/10) Une reponse
   // partielle (temps) est marquee echec : la demande reste en suspens.
   const tour = JSON.stringify([
-    { role: 'assistant', content: replyHistorique, ...(reponse.inacheve ? { echec: true as const } : {}) },
+    {
+      role: 'assistant',
+      content: replyHistorique,
+      ...(reponse.inacheve ? { echec: true as const } : {}),
+      ...(reponse.traces?.length ? { outils: reponse.traces } : {}),
+    },
   ] satisfies MessageStocke[])
 
   if (reponse.action) {
