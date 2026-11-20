@@ -12,13 +12,17 @@
 - Lots (liveclub/lots.ts) : message_id des cartes gardes dans details.cartes de la declaration (geste acces_broker
   lots_declares) ; fermeture des autres cartes APRES la decision ecrite et dite, seulement si elle a abouti ; texte de
   la carte = celui de la carte cliquee, sinon l'historique d'Agent AOK (lots-<id>-texte), sinon boutons seuls retires.
-  Clic tardif : notification « Déjà traité par Mel, le 20/11 à 14 h 02 : ... » et sa carte fermee avec la ligne.
+  Clic tardif : notification « Déjà traité par Mel, le 20/11 à 14 h 02 : lots notés faits. » ; sa carte fermee avec
+  la ligne seulement si la decision a plus de 60 s (ligneClicTardifLots : avant, elle peut encore etre annulee par
+  apresOui), sinon boutons seuls retires. Chaque carte est notee dans details.cartes juste apres SON envoi.
+- Fiche personne (fiche-personne.ts) : les details des gestes sont lus sans « cartes » (identifiants Telegram de
+  l'equipe) : left((x.details - 'cartes')::text, 160). Seule lecture de details::text trouvee.
 - Cartes d'avant le 21/11 : pas de message_id, aucun rattrapage possible par l'API des bots (pas de lecture des
   messages d'un chat) ; le clic tardif les ferme une par une.
 - PAS touchees (liste au rapport du 21/11) : corrections de @ (corrections-pseudo.ts, pas de champ JSON), alerte
   « un membre demande un humain » (Rendre la main / Déjà traité), cartes proposerCarteEquipe (declaration de depot
   de pause-depot.ts, cartes de fin de mois). Propositions de Tab : deja fermees partout (tab/repondre.ts, clore).
-- Verif : node scripts/verifier-cartes-equipe.mjs (9 blocs) ; editMessageText et ses refus NON essayes en reel.
+- Verif : node scripts/verifier-cartes-equipe.mjs (10 blocs) ; editMessageText et ses refus NON essayes en reel.
 
 ## FRICTIONS DE MELANIE AVEC AGENT AOK (20/11/2026, commite NON pousse, branche frictions-melanie ; aucune migration)
 
