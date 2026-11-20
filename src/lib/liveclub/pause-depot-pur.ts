@@ -68,7 +68,7 @@ import {
   BOUTON_LOTS, DELAI_LOTS_JOURS, ETAPES_LOTS, EXEMPLE_LOTS, RELANCE_LOTS_1_JOURS, RELANCE_LOTS_2_AVANT_FIN_JOURS,
   SUIVI_LOTS_DEPUIS, TENUE_LOTS, jourPlus, paragrapheLotsAdmission,
 } from './lots-pur'
-import { centimes, euros, jourCourt, libelleJour, slugPartenaire } from '../repartition/pur'
+import { centimes, euros, jourCourt, libelleJour, lireDevise, montant as enDevise, slugPartenaire, type Devise } from '../repartition/pur'
 
 // ---------------------------------------------------------------------------
 // L'offre
@@ -378,8 +378,10 @@ export type ParamsPauseDepot = {
   /** L'adresse de son abonnement Stripe si elle est autre, sinon null. */
   email_abonnement: string | null
   client: string | null
-  /** Le depot, en euros. */
+  /** Le depot, dans `devise` (jamais converti). */
   montant: number
+  /** (20/11) La devise du depot et de sa commission, celle du releve ; EUR par defaut. */
+  devise: Devise
   /** Le jour du depot 'YYYY-MM-DD'. */
   le: string
   /** La duree de la pause et de l'acces, en mois (1 a 6). */
@@ -431,6 +433,8 @@ export function lireParamsPauseDepot(p: Record<string, unknown>, ctx: { aujourdh
     if (!emailAbonnement) return "email_abonnement : l'adresse de son abonnement au Live Club, si elle n'est pas celle du broker."
     if (emailAbonnement === email) emailAbonnement = null
   }
+  const devise = lireDevise(p.devise)
+  if (!devise) return "devise : EUR ou USD, celle que donne le relevé (vide = EUR). Jamais de conversion : un montant en dollars s'inscrit en USD."
   const montant = lireMontant(p.montant, 'montant (le dépôt)', 1_000_000)
   if (typeof montant === 'string') return montant
   const brutJour = p.le === null || p.le === undefined ? '' : String(p.le).trim()
@@ -453,7 +457,7 @@ export function lireParamsPauseDepot(p: Record<string, unknown>, ctx: { aujourdh
   }
   const lu: ParamsPauseDepot = {
     partenaire, partenaire_nom: partenaireNom, email, email_abonnement: emailAbonnement,
-    client: texteCourt(p.client, 120), montant, le, mois, commission, note: texteCourt(p.note, 300),
+    client: texteCourt(p.client, 120), montant, devise, le, mois, commission, note: texteCourt(p.note, 300),
   }
   if (typeof p.abonnement_id === 'string' && ID_ABONNEMENT.test(p.abonnement_id)) lu.abonnement_id = p.abonnement_id
   if (typeof p.paye_jusquau === 'string' && JOUR.test(p.paye_jusquau)) lu.paye_jusquau = p.paye_jusquau
@@ -468,7 +472,7 @@ export function lireParamsPauseDepot(p: Record<string, unknown>, ctx: { aujourdh
 /** Les parametres d'une carte tels qu'ils peuvent aller dans un log : ni email, ni nom, ni note. */
 export function paramsPourLogPauseDepot(p: Record<string, unknown>): Record<string, unknown> {
   return {
-    partenaire: p.partenaire ?? null, montant: p.montant ?? null, le: p.le ?? null, mois: p.mois ?? null,
+    partenaire: p.partenaire ?? null, montant: p.montant ?? null, devise: p.devise ?? null, le: p.le ?? null, mois: p.mois ?? null,
     commission: p.commission === null || p.commission === undefined ? 'taux' : 'propre',
     abonnement: typeof p.abonnement_id === 'string' ? 'lu' : 'non', reprise_le: p.reprise_le ?? null,
   }
@@ -650,6 +654,8 @@ export type CartePauseDepot = {
   le: string
   /** Centimes. */
   commission: number
+  /** (20/11) Devise du depot et de la commission ; EUR si absente. */
+  devise?: Devise
   /** La phrase de la commission (attendue, mois prevu, 70/30), du serveur de la repartition. */
   phraseCommission: string
   payeJusquau: string
@@ -690,7 +696,7 @@ export function carteLonguePauseDepot(c: CartePauseDepot): string {
   return [
     "Dépôt broker d'un abonné : pause de son abonnement et accès Live Club, en une fois.",
     `${c.qui}${qui ? ` (${qui})` : ''}, abonné au Live Club${c.tarif ? ` (${c.tarif})` : ''}.`,
-    `Dépôt de ${euros(c.montant)} chez ${c.partenaireNom} le ${libelleJour(c.le)}. ${c.phraseCommission}`,
+    `Dépôt de ${enDevise(c.montant, c.devise ?? 'EUR')} chez ${c.partenaireNom} le ${libelleJour(c.le)}. ${c.phraseCommission}`,
     'Au clic :',
     `1. ${ligneDepot(c)}`,
     `2. ${ligneAcces(c)}`,
@@ -710,7 +716,7 @@ export function carteCourtePauseDepot(c: CartePauseDepot): string {
   const alerte = !c.telegram && c.etapes.acces === 'poser' ? ' Aucun compte Telegram relié à son abonnement.' : ''
   const reste = c.etapes.acces === 'garder' || c.etapes.depot === 'garder' || c.etapes.pause === 'garder'
     ? ' Seul ce qui manque sera fait.' : ''
-  return `Dépôt ${c.partenaireNom} de ${euros(c.montant)} le ${jourCourt(c.le)} pour ${c.qui}, commission ${euros(c.commission)}. `
+  return `Dépôt ${c.partenaireNom} de ${enDevise(c.montant, c.devise ?? 'EUR')} le ${jourCourt(c.le)} pour ${c.qui}, commission ${enDevise(c.commission, c.devise ?? 'EUR')}. `
     + `Abonnement en pause du ${jourCourt(c.payeJusquau)} au ${libelleJour(c.repriseLe)}, accès broker jusqu'au même jour : `
     + `il garde le groupe, reprise toute seule.${alerte}${reste}`
 }

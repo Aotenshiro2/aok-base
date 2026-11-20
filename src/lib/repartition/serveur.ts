@@ -31,6 +31,7 @@ import {
   libelleTarif, libelleTaux, moisDe, moisParis, moisPrevuCommission, moisValide, partsCommission, pourcent,
   repartitionDuMois, tarifDuMois, tarifsEnVigueur, tauxEnVigueur, venteDePaiement, versEuros,
   type CommissionRetro, PREFIXE_NOTE_ACCORD, accordNote, phraseRetroactif, planRetroactif, texteDepotDejaInscrit,
+  type Devise, deviseOuEuro, montant as enDevise,
 } from '@/lib/repartition/pur'
 
 const MIGRATION = '20261008170000_cockpit_repartition.sql'
@@ -97,6 +98,8 @@ type LigneCommission = {
   montant_recu: number | null
   recue_le: string | null
   encaisse_par: Cote
+  /** (20/11) Devise de montant_base, montant_fixe et commission_attendue ; montant_recu est en euros. */
+  devise: Devise
   note: string | null
   pose_le: Date
 }
@@ -107,6 +110,8 @@ type LigneTaux = {
   a_partir_du: string
   taux_pct: number | null
   montant_fixe: number | null
+  /** (20/11) Devise du montant fixe. */
+  devise: Devise
   note: string | null
   pose_le: Date
 }
@@ -200,7 +205,7 @@ function lireCommissions(): Promise<LigneCommission[]> {
            c.le::text as le, c.montant_base::float8 as montant_base, c.taux_pct::float8 as taux_pct,
            c.montant_fixe::float8 as montant_fixe, c.commission_attendue::float8 as commission_attendue,
            c.lots_faits_le::text as lots_faits_le, c.statut, c.montant_recu::float8 as montant_recu,
-           c.recue_le::text as recue_le, c.encaisse_par, c.note, c.pose_le
+           c.recue_le::text as recue_le, c.encaisse_par, c.devise, c.note, c.pose_le
     from public.cockpit_commissions c
     join public.cockpit_partenaires p on p.partenaire_id = c.partenaire_id
     left join public.cockpit_liveclub_acces a on a.acces_id = c.acces_id
@@ -210,7 +215,7 @@ function lireCommissions(): Promise<LigneCommission[]> {
 function lireTaux(): Promise<LigneTaux[]> {
   return prisma.$queryRaw<LigneTaux[]>`
     select taux_id::text as taux_id, partenaire_id, a_partir_du::text as a_partir_du,
-           taux_pct::float8 as taux_pct, montant_fixe::float8 as montant_fixe, note, pose_le
+           taux_pct::float8 as taux_pct, montant_fixe::float8 as montant_fixe, devise, note, pose_le
     from public.cockpit_partenaire_taux
     order by partenaire_id, a_partir_du desc, pose_le desc`
 }
@@ -331,6 +336,7 @@ function versCommission(c: LigneCommission): Commission {
     lotsFaitsLe: c.lots_faits_le,
     statut: c.statut,
     attendue: centimes(c.commission_attendue) ?? 0,
+    devise: deviseOuEuro(c.devise),
     recue: c.montant_recu === null ? null : centimes(c.montant_recu),
     recueLe: c.recue_le,
     encaissePar: c.encaisse_par,
@@ -343,6 +349,7 @@ function versTaux(t: LigneTaux): TauxPartenaire {
     aPartirDu: t.a_partir_du,
     tauxPct: t.taux_pct,
     montantFixe: t.montant_fixe === null ? null : centimes(t.montant_fixe),
+    devise: deviseOuEuro(t.devise),
     poseLe: iso(t.pose_le),
   }
 }
@@ -541,6 +548,8 @@ export function repartitionEnEuros(r: Repartition) {
       attendues: {
         nb: r.commissions.attendues.nb, montant: versEuros(r.commissions.attendues.montant),
         glissees: r.commissions.attendues.glissees,
+        // (20/11) Les attendues en dollars, a part : jamais dans les euros.
+        dollars: { nb: r.commissions.attendues.dollars.nb, montant: versEuros(r.commissions.attendues.dollars.montant) },
       },
     },
     lignes: r.lignes.map(l => ({
@@ -563,7 +572,9 @@ export async function repartitionPourAgent(moisDemande: unknown): Promise<string
     const m = await chargerMois(mois, moisCourant)
     const attendues = m.commissions.filter(c => c.statut === 'attendue').slice(0, 30).map(c => ({
       commission_id: c.commission_id, partenaire: c.partenaire, client: c.client ?? c.email, depot_le: c.le,
-      attendue: c.commission_attendue, lots_faits_le: c.lots_faits_le,
+      attendue: c.commission_attendue, devise: deviseOuEuro(c.devise),
+      attendue_texte: enDevise(centimes(c.commission_attendue) ?? 0, deviseOuEuro(c.devise)),
+      lots_faits_le: c.lots_faits_le,
       mois_prevu: moisPrevuCommission({ statut: c.statut, le: c.le, lotsFaitsLe: c.lots_faits_le }, moisCourant),
       glissee: glissementCommission({ statut: c.statut, le: c.le, lotsFaitsLe: c.lots_faits_le }, moisCourant),
     }))
@@ -608,8 +619,8 @@ export async function repartitionPourCockpit(mois: string) {
       const pour = { statut: c.statut, le: c.le, lotsFaitsLe: c.lots_faits_le }
       return {
         commission_id: c.commission_id, partenaire_id: c.partenaire_id, partenaire: c.partenaire, nature: c.nature,
-        client: c.client, email: c.email, le: c.le, montant_base: c.montant_base,
-        taux: libelleTaux({ tauxPct: c.taux_pct, montantFixe: c.montant_fixe === null ? null : centimes(c.montant_fixe) }, c.nature),
+        client: c.client, email: c.email, le: c.le, montant_base: c.montant_base, devise: deviseOuEuro(c.devise),
+        taux: libelleTaux({ tauxPct: c.taux_pct, montantFixe: c.montant_fixe === null ? null : centimes(c.montant_fixe), devise: deviseOuEuro(c.devise) }, c.nature),
         commission_attendue: c.commission_attendue, lots_faits_le: c.lots_faits_le, statut: c.statut,
         montant_recu: c.montant_recu, recue_le: c.recue_le, encaisse_par: c.encaisse_par, note: c.note,
         mois_prevu: moisPrevuCommission(pour, moisCourant), glissee: glissementCommission(pour, moisCourant),
@@ -678,7 +689,7 @@ async function partenaireParId(id: string): Promise<LignePartenaire | null> {
 async function tauxDuPartenaire(id: string): Promise<TauxPartenaire[]> {
   const lignes = await prisma.$queryRaw<LigneTaux[]>`
     select taux_id::text as taux_id, partenaire_id, a_partir_du::text as a_partir_du,
-           taux_pct::float8 as taux_pct, montant_fixe::float8 as montant_fixe, note, pose_le
+           taux_pct::float8 as taux_pct, montant_fixe::float8 as montant_fixe, devise, note, pose_le
     from public.cockpit_partenaire_taux where partenaire_id = ${id}`
   return lignes.map(versTaux)
 }
@@ -702,7 +713,7 @@ async function commissionParId(id: string): Promise<LigneCommission | null> {
            c.le::text as le, c.montant_base::float8 as montant_base, c.taux_pct::float8 as taux_pct,
            c.montant_fixe::float8 as montant_fixe, c.commission_attendue::float8 as commission_attendue,
            c.lots_faits_le::text as lots_faits_le, c.statut, c.montant_recu::float8 as montant_recu,
-           c.recue_le::text as recue_le, c.encaisse_par, c.note, c.pose_le
+           c.recue_le::text as recue_le, c.encaisse_par, c.devise, c.note, c.pose_le
     from public.cockpit_commissions c
     join public.cockpit_partenaires p on p.partenaire_id = c.partenaire_id
     left join public.cockpit_liveclub_acces a on a.acces_id = c.acces_id
@@ -716,18 +727,20 @@ async function commissionParId(id: string): Promise<LigneCommission | null> {
  * broker), SANS limite de temps. Avant : seulement les 10 dernieres minutes,
  * et une carte confirmee plus tard inscrivait la commission une seconde fois.
  */
-async function depotDejaInscrit(partenaireId: string, le: string, base: number, email: string): Promise<string | null> {
+async function depotDejaInscrit(partenaireId: string, le: string, base: number, email: string, devise: Devise): Promise<string | null> {
+  // (20/11) Meme devise aussi : 721 USD et 721 EUR ne sont pas le meme depot.
+  // Le montant passe en texte a 2 decimales (jamais un flottant vers ::numeric).
   const lignes = await prisma.$queryRaw<{
-    qui: string | null; partenaire: string; le: string; montant_base: number; commission_attendue: number; statut: string; pose_le: string | null
+    qui: string | null; partenaire: string; le: string; montant_base: number; commission_attendue: number; devise: Devise; statut: string; pose_le: string | null
   }[]>`
     select coalesce(c.client, c.email, a.email) as qui, p.nom as partenaire, c.le::text as le,
            c.montant_base::float8 as montant_base, c.commission_attendue::float8 as commission_attendue,
-           c.statut, c.pose_le::text as pose_le
+           c.devise, c.statut, c.pose_le::text as pose_le
     from public.cockpit_commissions c
     join public.cockpit_partenaires p on p.partenaire_id = c.partenaire_id
     left join public.cockpit_liveclub_acces a on a.acces_id = c.acces_id
     where c.partenaire_id = ${partenaireId} and c.nature = 'depot' and c.le = ${le}::date
-      and c.montant_base = ${versEuros(base)}::numeric
+      and c.montant_base = ${numeric(base)}::numeric and c.devise = ${devise}
       and (lower(c.email) = ${email} or lower(a.email) = ${email})
     order by c.pose_le
     limit 1`
@@ -735,17 +748,17 @@ async function depotDejaInscrit(partenaireId: string, le: string, base: number, 
   if (!d) return null
   return texteDepotDejaInscrit({
     qui: d.qui ?? email, partenaire: d.partenaire, base: centimes(d.montant_base) ?? base, le: d.le,
-    attendue: centimes(d.commission_attendue) ?? 0, statut: d.statut, poseLe: d.pose_le,
+    attendue: centimes(d.commission_attendue) ?? 0, devise: deviseOuEuro(d.devise), statut: d.statut, poseLe: d.pose_le,
   })
 }
 
 /** (29/10) Les commissions d'un partenaire depuis une date, pour un taux retroactif. */
 async function commissionsDepuis(partenaireId: string, depuis: string): Promise<CommissionRetro[]> {
   const lignes = await prisma.$queryRaw<{
-    commission_id: string; qui: string | null; le: string; montant_base: number | null; commission_attendue: number; statut: string; note: string | null
+    commission_id: string; qui: string | null; le: string; montant_base: number | null; commission_attendue: number; devise: Devise; statut: string; note: string | null
   }[]>`
     select c.commission_id::text as commission_id, coalesce(c.client, c.email, a.email, 'client') as qui, c.le::text as le,
-           c.montant_base::float8 as montant_base, c.commission_attendue::float8 as commission_attendue, c.statut, c.note
+           c.montant_base::float8 as montant_base, c.commission_attendue::float8 as commission_attendue, c.devise, c.statut, c.note
     from public.cockpit_commissions c
     left join public.cockpit_liveclub_acces a on a.acces_id = c.acces_id
     where c.partenaire_id = ${partenaireId} and c.le >= ${depuis}::date
@@ -753,6 +766,7 @@ async function commissionsDepuis(partenaireId: string, depuis: string): Promise<
   return lignes.map(l => ({
     commissionId: l.commission_id, qui: l.qui ?? 'client', le: l.le,
     base: l.montant_base === null ? null : centimes(l.montant_base), attendue: centimes(l.commission_attendue) ?? 0,
+    devise: deviseOuEuro(l.devise),
     statut: l.statut === 'recue' ? 'recue' : l.statut === 'perdue' ? 'perdue' : 'attendue', note: l.note,
   }))
 }
@@ -788,14 +802,23 @@ function phraseCommission(o: {
   attendue: number | null; taux: TauxPartenaire; nature: 'depot' | 'affiliation'; le: string; client: string; moisCourant: string
   /** (29/10) « commission propre à ce dépôt » quand elle a ete donnee avec lui. */
   libelle?: string
+  /** (20/11) La devise du depot et de la commission attendue. */
+  devise: Devise
 }): string {
   const libelle = o.libelle ?? libelleTaux(o.taux, o.nature)
-  if (o.attendue === null) return `Taux de ${libelle} : montant inconnu sans la base.`
+  if (o.attendue === null) {
+    if (o.taux.montantFixe !== null && (o.taux.devise ?? 'EUR') !== o.devise) {
+      return `Taux de ${libelle} : il n'est pas dans la devise du dépôt (${o.devise}), rien n'est converti. Donne la commission de ce dépôt, en ${o.devise}.`
+    }
+    return `Taux de ${libelle} : montant inconnu sans la base.`
+  }
   const prevu = moisPrevuCommission({ statut: 'attendue', le: o.le, lotsFaitsLe: null }, o.moisCourant) ?? o.moisCourant
-  const parts = partsCommission(o.attendue)
-  return `Commission attendue : ${euros(o.attendue)} (${libelle}), prévue fin ${libelleMois(prevu)}`
+  const debut = `Commission attendue : ${enDevise(o.attendue, o.devise)} (${libelle}), prévue fin ${libelleMois(prevu)}`
     + (o.nature === 'depot' ? ` si ${o.client} fait ses lots d'ici là, sinon elle glisse au mois suivant.` : '.')
-    + ` Part de Mel : ${euros(parts.mel)}, part de Brice : ${euros(parts.brice)} (70/30, avant dépenses).`
+  // (20/11) En dollars : aucun 70/30 a l'avance (il se fera sur les euros reçus).
+  if (o.devise !== 'EUR') return `${debut} En dollars : le 70/30 se fera sur les euros réellement reçus, sans conversion.`
+  const parts = partsCommission(o.attendue)
+  return `${debut} Part de Mel : ${euros(parts.mel)}, part de Brice : ${euros(parts.brice)} (70/30, avant dépenses).`
 }
 
 /**
@@ -809,7 +832,7 @@ async function tauxPourDepot(
   if (type === 'depot_broker' && p.commission !== null && p.commission !== undefined) {
     const c = centimes(p.commission)
     if (c !== null) {
-      return { taux: { partenaireId, aPartirDu: le, tauxPct: null, montantFixe: c }, libelle: 'commission propre à ce dépôt' }
+      return { taux: { partenaireId, aPartirDu: le, tauxPct: null, montantFixe: c, devise: deviseOuEuro(p.devise) }, libelle: 'commission propre à ce dépôt' }
     }
   }
   const taux = tauxEnVigueur(await tauxDuPartenaire(partenaireId), partenaireId, le)
@@ -842,6 +865,8 @@ export type DepotPourPause = {
   base: number
   /** Centimes. */
   attendue: number
+  /** (20/11) Devise de la base et de l'attendue. */
+  devise: Devise
   taux: TauxPartenaire
   /** « commission propre à ce dépôt » quand elle est donnee avec lui, sinon null. */
   libelle: string | null
@@ -852,7 +877,10 @@ export type DepotPourPause = {
 /** La commission d'un depot pour ce parcours, ou ce qui manque (rendu au modele, comme la carte de depot broker). */
 export async function depotPourPauseDepot(p: {
   partenaire: string; partenaire_nom: string; le: string; montant: number; commission: number | null; client: string | null; email: string
+  /** (20/11) Devise du depot et de sa commission ; EUR si absente. */
+  devise?: Devise
 }): Promise<DepotPourPause | { erreur: string }> {
+  const devise = p.devise ?? 'EUR'
   const { moisCourant } = contexteParis()
   const partenaire = await partenaireParId(p.partenaire)
   if (!partenaire) {
@@ -863,7 +891,7 @@ export async function depotPourPauseDepot(p: {
     }
   }
   if (partenaire.nature !== 'broker') return { erreur: `${partenaire.nom} est une affiliation, pas un broker : ce parcours ne vaut que pour un dépôt chez un broker.` }
-  const choix = await tauxPourDepot('depot_broker', { commission: p.commission }, partenaire.partenaire_id, p.le)
+  const choix = await tauxPourDepot('depot_broker', { commission: p.commission, devise }, partenaire.partenaire_id, p.le)
   if (!choix) {
     const accord = accordNote(partenaire.note)
     return {
@@ -873,13 +901,18 @@ export async function depotPourPauseDepot(p: {
     }
   }
   const base = centimes(p.montant) ?? 0
-  const attendue = commissionDuTaux(choix.taux, base)
-  if (attendue === null) return { erreur: `Le taux de ${partenaire.nom} est en % : il faut le montant du dépôt. Demande-le.` }
+  const attendue = commissionDuTaux(choix.taux, base, devise)
+  if (attendue === null) {
+    if (choix.taux.montantFixe !== null) {
+      return { erreur: `Le taux de ${partenaire.nom} (${libelleTaux(choix.taux)}) n'est pas dans la devise de ce dépôt (${devise}) : rien n'est converti. Demande la commission de ce dépôt, en ${devise}, puis repropose.` }
+    }
+    return { erreur: `Le taux de ${partenaire.nom} est en % : il faut le montant du dépôt. Demande-le.` }
+  }
   const client = p.client ?? p.email
   return {
-    partenaireId: partenaire.partenaire_id, partenaireNom: partenaire.nom, base, attendue, taux: choix.taux,
+    partenaireId: partenaire.partenaire_id, partenaireNom: partenaire.nom, base, attendue, devise, taux: choix.taux,
     libelle: choix.libelle ?? null,
-    phrase: phraseCommission({ attendue, taux: choix.taux, nature: 'depot', le: p.le, client, moisCourant, libelle: choix.libelle }),
+    phrase: phraseCommission({ attendue, taux: choix.taux, nature: 'depot', le: p.le, client, moisCourant, libelle: choix.libelle, devise }),
   }
 }
 
@@ -934,9 +967,10 @@ export async function controlerActionRepartition(a: ActionAgent): Promise<Contro
         return { erreur: `${partenaire.nom} est une affiliation, pas un broker : utilise proposer_commission_affiliation.` }
       }
       const le = String(p.le)
+      const devise = deviseOuEuro(p.devise)
       // (29/10, cas de Victor Weber) Un depot deja inscrit : rien a proposer.
       if (type === 'depot_broker') {
-        const deja = await depotDejaInscrit(partenaire.partenaire_id, le, centimes(p.montant) ?? 0, String(p.email))
+        const deja = await depotDejaInscrit(partenaire.partenaire_id, le, centimes(p.montant) ?? 0, String(p.email), devise)
         if (deja) return { erreur: `${deja} Dis-le à ton interlocuteur au lieu de proposer une carte.` }
       }
       const choix = await tauxPourDepot(type, p, partenaire.partenaire_id, le)
@@ -961,12 +995,15 @@ export async function controlerActionRepartition(a: ActionAgent): Promise<Contro
       const { taux, libelle } = choix
       const nature = type === 'depot_broker' ? 'depot' : 'affiliation'
       const base = p.montant === null || p.montant === undefined ? null : centimes(p.montant)
-      const attendue = commissionDuTaux(taux, base)
+      const attendue = commissionDuTaux(taux, base, devise)
       if (attendue === null) {
+        if (taux.montantFixe !== null) {
+          return { erreur: `Le taux de ${partenaire.nom} (${libelleTaux(taux, nature)}) n'est pas dans la devise de ce dépôt (${devise}) : rien n'est converti. Demande la commission de ce dépôt, en ${devise}, passe-la (commission) et repropose.` }
+        }
         return { erreur: `Le taux de ${partenaire.nom} est en % : il faut le montant de la vente (montant) pour calculer la commission. Demande-le.` }
       }
       const client = String(p.client ?? p.email ?? 'le client')
-      let complement = phraseCommission({ attendue, taux, nature, le, client, moisCourant, libelle })
+      let complement = phraseCommission({ attendue, taux, nature, le, client, moisCourant, libelle, devise })
       const accordConnu = accordNote(partenaire.note)
       if (accordConnu) complement += ` Accord de ${partenaire.nom} : ${accordConnu}.`
       let manque: string | null = null
@@ -1003,12 +1040,14 @@ export async function controlerActionRepartition(a: ActionAgent): Promise<Contro
       }
       const enrichie: ActionAgent = { ...a, params: { ...p, qui: p.qui ?? qui(c), ...(regularisation ? { regulariser: true } : {}) } }
       const attendue = centimes(c.commission_attendue) ?? 0
-      let complement = `${qui(c)}, ${c.nature === 'depot' ? `dépôt de ${euros(centimes(c.montant_base) ?? 0)}` : 'affiliation'} chez ${c.partenaire} du ${libelleJour(c.le)}, commission attendue ${euros(attendue)}.`
+      const devise = deviseOuEuro(c.devise)
+      let complement = `${qui(c)}, ${c.nature === 'depot' ? `dépôt de ${enDevise(centimes(c.montant_base) ?? 0, devise)}` : 'affiliation'} chez ${c.partenaire} du ${libelleJour(c.le)}, commission attendue ${enDevise(attendue, devise)}.`
       let alerte: string | null = null
       if (p.etat === 'recue') {
+        // (20/11) Le recu est en euros (ce qui est arrive) : le 70/30 se fait dessus.
         const recue = centimes(p.montant) ?? 0
         const parts = partsCommission(recue)
-        complement += ` Reçue : ${euros(recue)}, part de Mel ${euros(parts.mel)}, part de Brice ${euros(parts.brice)}.`
+        complement += ` Reçue : ${euros(recue)}${devise !== 'EUR' ? ' (les euros arrivés sur le compte)' : ''}, part de Mel ${euros(parts.mel)}, part de Brice ${euros(parts.brice)}.`
       }
       if (regularisation && c.acces_id) complement += ` ${PHRASE_CARTE_REGULARISATION}`
       // (31/10) Perdue : l'acces broker se ferme s'il n'a pas d'autre depot attendu ou recu.
@@ -1063,7 +1102,7 @@ export async function controlerActionRepartition(a: ActionAgent): Promise<Contro
         : `Nouveau partenaire (${p.nature}).`
       if (p.retroactif === true) {
         if (!partenaire) return { erreur: "retroactif : un nouveau partenaire n'a aucun dépôt inscrit. Repropose sans retroactif." }
-        const t = { tauxPct: p.taux_pct === null || p.taux_pct === undefined ? null : Number(p.taux_pct), montantFixe: p.montant_fixe === null || p.montant_fixe === undefined ? null : centimes(p.montant_fixe) }
+        const t = { tauxPct: p.taux_pct === null || p.taux_pct === undefined ? null : Number(p.taux_pct), montantFixe: p.montant_fixe === null || p.montant_fixe === undefined ? null : centimes(p.montant_fixe), devise: deviseOuEuro(p.devise) }
         complement += `\n${phraseRetroactif(planRetroactif(await commissionsDepuis(partenaire.partenaire_id, aPartirDu), t, aPartirDu), aPartirDu)}`
       }
       return { action: a, complement, manque: null }
@@ -1248,22 +1287,28 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
     const { taux, libelle } = choix
     const nature = type === 'depot_broker' ? 'depot' : 'affiliation'
     const base = p.montant === null || p.montant === undefined ? null : centimes(p.montant)
-    const attendue = commissionDuTaux(taux, base)
-    if (attendue === null) throw new RefusAction(`Le taux de ${partenaire.nom} est en % : il faut le montant de la vente. Rien n'a été fait.`)
+    // (20/11) La devise dite (EUR par defaut), gardee telle quelle : jamais convertie.
+    const devise = deviseOuEuro(p.devise)
+    const attendue = commissionDuTaux(taux, base, devise)
+    if (attendue === null) {
+      throw new RefusAction(taux.montantFixe !== null
+        ? `Le taux de ${partenaire.nom} n'est pas dans la devise de ce dépôt (${devise}) : rien n'a été fait. Donne la commission de ce dépôt, en ${devise}.`
+        : `Le taux de ${partenaire.nom} est en % : il faut le montant de la vente. Rien n'a été fait.`)
+    }
     const client = typeof p.client === 'string' ? p.client : null
 
     if (type === 'commission_affiliation') {
       const lignes = await prisma.$queryRaw<{ commission_id: string }[]>`
         insert into public.cockpit_commissions
-          (partenaire_id, nature, client, le, montant_base, taux_pct, montant_fixe, commission_attendue, note, pose_par, via)
+          (partenaire_id, nature, client, le, montant_base, taux_pct, montant_fixe, commission_attendue, devise, note, pose_par, via)
         values (${partenaire.partenaire_id}, 'affiliation', ${client}, ${le}::date,
-                ${base === null ? null : versEuros(base)}::numeric, ${taux.tauxPct}::numeric,
-                ${taux.montantFixe === null ? null : versEuros(taux.montantFixe)}::numeric,
-                ${versEuros(attendue)}::numeric, ${note}, ${posePar}::uuid, 'agent')
+                ${base === null ? null : numeric(base)}::numeric, ${taux.tauxPct}::numeric,
+                ${taux.montantFixe === null ? null : numeric(taux.montantFixe)}::numeric,
+                ${numeric(attendue)}::numeric, ${devise}, ${note}, ${posePar}::uuid, 'agent')
         returning commission_id::text as commission_id`
       if (!lignes[0]) throw new Error("La base n'a pas inscrit la commission.")
       return `Affiliation ${partenaire.nom} inscrite pour ${client}, le ${libelleJour(le)}.\n`
-        + `${phraseCommission({ attendue, taux, nature, le, client: client ?? 'le client', moisCourant })}\n`
+        + `${phraseCommission({ attendue, taux, nature, le, client: client ?? 'le client', moisCourant, devise })}\n`
         + `Quand ${partenaire.nom} paie, donne-moi le montant reçu et la date.`
     }
 
@@ -1275,7 +1320,7 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
     // temps et AVANT tout geste : meme broker, meme jour, meme montant, meme
     // personne (email de la ligne ou de son acces). Avant : 10 minutes
     // seulement, et une carte confirmee plus tard comptait la commission deux fois.
-    const deja = await depotDejaInscrit(partenaire.partenaire_id, le, base ?? 0, email)
+    const deja = await depotDejaInscrit(partenaire.partenaire_id, le, base ?? 0, email, devise)
     if (deja) throw new RefusAction(deja)
     let acces = await accesParEmail(email)
     let issue: 'email_parti' | 'email_pas_parti' | 'existant' | 'abonne'
@@ -1315,28 +1360,30 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
     const doublon = await prisma.$queryRaw<{ n: number }[]>`
       select count(*)::int as n from public.cockpit_commissions
       where partenaire_id = ${partenaire.partenaire_id} and nature = 'depot' and le = ${le}::date
-        and montant_base = ${versEuros(base ?? 0)}::numeric
+        and montant_base = ${numeric(base ?? 0)}::numeric and devise = ${devise}
         and (acces_id = ${acces?.acces_id ?? null}::uuid or lower(email) = ${email})`
     if ((doublon[0]?.n ?? 0) > 0) {
-      throw new RefusAction(`Ce dépôt de ${euros(base ?? 0)} pour ${quiClient} est déjà inscrit : rien n'a été refait.`)
+      throw new RefusAction(`Ce dépôt de ${enDevise(base ?? 0, devise)} pour ${quiClient} est déjà inscrit : rien n'a été refait.`)
     }
 
+    // (20/11) Montants en texte a 2 decimales (numeric()), plus en flottant :
+    // le depot du 12/11 etait stocke 650.9299999999999.
     try {
       await prisma.$executeRaw`
         insert into public.cockpit_commissions
           (partenaire_id, nature, acces_id, email, client, le, montant_base, taux_pct, montant_fixe,
-           commission_attendue, note, pose_par, via)
+           commission_attendue, devise, note, pose_par, via)
         values (${partenaire.partenaire_id}, 'depot', ${acces?.acces_id ?? null}::uuid,
-                ${acces ? null : email}, ${client}, ${le}::date, ${versEuros(base ?? 0)}::numeric,
-                ${taux.tauxPct}::numeric, ${taux.montantFixe === null ? null : versEuros(taux.montantFixe)}::numeric,
-                ${versEuros(attendue)}::numeric, ${libelle ? [`[${libelle}]`, note].filter(Boolean).join(' ') : note}, ${posePar}::uuid, 'agent')`
+                ${acces ? null : email}, ${client}, ${le}::date, ${numeric(base ?? 0)}::numeric,
+                ${taux.tauxPct}::numeric, ${taux.montantFixe === null ? null : numeric(taux.montantFixe)}::numeric,
+                ${numeric(attendue)}::numeric, ${devise}, ${libelle ? [`[${libelle}]`, note].filter(Boolean).join(' ') : note}, ${posePar}::uuid, 'agent')`
     } catch (err) {
       if (relationAbsente(err)) throw err
       throw new Error(`${ligneAcces}\nMais le dépôt n'est PAS inscrit (${erreurLisible(err)}) : redemande l'inscription du dépôt, l'accès ne sera pas refait.`)
     }
 
-    return `Dépôt de ${euros(base ?? 0)} chez ${partenaire.nom} inscrit pour ${client ? `${client} (${email})` : email}, le ${libelleJour(le)}.\n`
-      + `${phraseCommission({ attendue, taux, nature, le, client: quiClient, moisCourant, libelle })}\n`
+    return `Dépôt de ${enDevise(base ?? 0, devise)} chez ${partenaire.nom} inscrit pour ${client ? `${client} (${email})` : email}, le ${libelleJour(le)}.\n`
+      + `${phraseCommission({ attendue, taux, nature, le, client: quiClient, moisCourant, libelle, devise })}\n`
       + `${ligneAcces}\n`
       + etapeApresDepot({ acces: issue, qui: quiClient, partenaire: partenaire.nom, bot: nomBot() })
   }
@@ -1369,7 +1416,7 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
       const lotsFaits = etat === 'lots_faits' ? le : c.lots_faits_le
       const prevu = moisPrevuCommission({ statut: 'attendue', le: c.le, lotsFaitsLe: lotsFaits }, moisCourant) ?? moisCourant
       return `Commission de ${qui(c)} (${c.partenaire}) régularisée : de nouveau attendue`
-        + `${etat === 'lots_faits' ? `, lots faits le ${libelleJour(le)}` : ''}, ${euros(centimes(c.commission_attendue) ?? 0)} attendus fin ${libelleMois(prevu)}.`
+        + `${etat === 'lots_faits' ? `, lots faits le ${libelleJour(le)}` : ''}, ${enDevise(centimes(c.commission_attendue) ?? 0, deviseOuEuro(c.devise))} attendus fin ${libelleMois(prevu)}.`
         + `${acces ? `\n${acces}` : ''}\n`
         + (lotsFaits ? etapeApresMarquage('lots_faits', c.partenaire) : `Dis-moi quand ${qui(c)} a fait ses lots chez ${c.partenaire}.`)
     }
@@ -1381,7 +1428,7 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
     } else if (etat === 'recue') {
       n = await prisma.$executeRaw`
         update public.cockpit_commissions
-        set statut = 'recue', montant_recu = ${Number(p.montant)}::numeric, recue_le = ${le}::date,
+        set statut = 'recue', montant_recu = ${numeric(centimes(p.montant) ?? 0)}::numeric, recue_le = ${le}::date,
             encaisse_par = ${String(p.encaisse_par ?? 'mel')}, maj_par = ${posePar}::uuid, note = coalesce(${note}, note)
         where commission_id = ${id}::uuid and statut = 'attendue'`
     } else {
@@ -1394,15 +1441,18 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
 
     if (etat === 'lots_faits') {
       const prevu = moisPrevuCommission({ statut: 'attendue', le: c.le, lotsFaitsLe: le }, moisCourant) ?? moisCourant
-      return `Lots faits le ${libelleJour(le)} pour ${qui(c)} (${c.partenaire}) : commission de ${euros(centimes(c.commission_attendue) ?? 0)} `
+      return `Lots faits le ${libelleJour(le)} pour ${qui(c)} (${c.partenaire}) : commission de ${enDevise(centimes(c.commission_attendue) ?? 0, deviseOuEuro(c.devise))} `
         + `attendue fin ${libelleMois(prevu)}.\n${etapeApresMarquage('lots_faits', c.partenaire)}`
     }
     if (etat === 'recue') {
       const recue = centimes(p.montant) ?? 0
       const parts = partsCommission(recue)
-      const ecart = recue - (centimes(c.commission_attendue) ?? 0)
+      // (20/11) Attendue en dollars : pas d'ecart calcule (deux devises, aucun taux).
+      const deviseAttendue = deviseOuEuro(c.devise)
+      const ecart = deviseAttendue === 'EUR' ? recue - (centimes(c.commission_attendue) ?? 0) : 0
       return `Commission de ${qui(c)} (${c.partenaire}) reçue : ${euros(recue)} le ${libelleJour(le)}, `
         + `encaissée par ${NOM_COTE[(p.encaisse_par as Cote) ?? 'mel']}`
+        + (deviseAttendue !== 'EUR' ? ` (attendue ${enDevise(centimes(c.commission_attendue) ?? 0, deviseAttendue)} ; le 70/30 se fait sur les euros reçus)` : '')
         + (ecart ? ` (attendue ${euros(centimes(c.commission_attendue) ?? 0)}, écart ${euros(ecart)})` : '')
         + `. Part de Mel : ${euros(parts.mel)}, part de Brice : ${euros(parts.brice)}.\n`
         + etapeApresMarquage('recue', c.partenaire, moisDe(le))
@@ -1426,6 +1476,8 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
     const t = {
       tauxPct: p.taux_pct === null || p.taux_pct === undefined ? null : Number(p.taux_pct),
       montantFixe: p.montant_fixe === null || p.montant_fixe === undefined ? null : centimes(p.montant_fixe),
+      // (20/11) La devise du montant fixe (EUR par defaut).
+      devise: deviseOuEuro(p.devise),
     }
     const issue = await prisma.$transaction(async (tx) => {
       const existant = await tx.$queryRaw<LignePartenaire[]>`
@@ -1454,13 +1506,13 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
       if (sansTaux) return { partenaire, avant: null, nouveau: existant.length === 0, noteAvant, retro: null }
       const avantLignes = await tx.$queryRaw<LigneTaux[]>`
         select taux_id::text as taux_id, partenaire_id, a_partir_du::text as a_partir_du,
-               taux_pct::float8 as taux_pct, montant_fixe::float8 as montant_fixe, note, pose_le
+               taux_pct::float8 as taux_pct, montant_fixe::float8 as montant_fixe, devise, note, pose_le
         from public.cockpit_partenaire_taux where partenaire_id = ${id}`
       const avant = tauxEnVigueur(avantLignes.map(versTaux), id, aPartirDu)
       await tx.$executeRaw`
-        insert into public.cockpit_partenaire_taux (partenaire_id, a_partir_du, taux_pct, montant_fixe, note, pose_par, via)
+        insert into public.cockpit_partenaire_taux (partenaire_id, a_partir_du, taux_pct, montant_fixe, devise, note, pose_par, via)
         values (${id}, ${aPartirDu}::date, ${p.taux_pct === null ? null : Number(p.taux_pct)}::numeric,
-                ${p.montant_fixe === null ? null : Number(p.montant_fixe)}::numeric, ${noteAccord ?? note}, ${posePar}::uuid, 'agent')`
+                ${t.montantFixe === null ? null : numeric(t.montantFixe)}::numeric, ${t.devise}, ${noteAccord ?? note}, ${posePar}::uuid, 'agent')`
       // (29/10) Retroactif, dit explicitement : les commissions ENCORE
       // ATTENDUES depuis la date d'effet prennent le nouveau taux (fige dans
       // la ligne, comme a l'inscription). Recues, perdues et commissions
@@ -1468,10 +1520,10 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
       let retro: ReturnType<typeof planRetroactif> | null = null
       if (retroactif && existant.length > 0) {
         const lignes = await tx.$queryRaw<{
-          commission_id: string; qui: string | null; le: string; montant_base: number | null; commission_attendue: number; statut: string; note: string | null
+          commission_id: string; qui: string | null; le: string; montant_base: number | null; commission_attendue: number; devise: Devise; statut: string; note: string | null
         }[]>`
           select c.commission_id::text as commission_id, coalesce(c.client, c.email, a.email, 'client') as qui, c.le::text as le,
-                 c.montant_base::float8 as montant_base, c.commission_attendue::float8 as commission_attendue, c.statut, c.note
+                 c.montant_base::float8 as montant_base, c.commission_attendue::float8 as commission_attendue, c.devise, c.statut, c.note
           from public.cockpit_commissions c
           left join public.cockpit_liveclub_acces a on a.acces_id = c.acces_id
           where c.partenaire_id = ${id} and c.le >= ${aPartirDu}::date
@@ -1480,6 +1532,7 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
         retro = planRetroactif(lignes.map(l => ({
           commissionId: l.commission_id, qui: l.qui ?? 'client', le: l.le,
           base: l.montant_base === null ? null : centimes(l.montant_base), attendue: centimes(l.commission_attendue) ?? 0,
+          devise: deviseOuEuro(l.devise),
           statut: l.statut === 'recue' ? 'recue' : l.statut === 'perdue' ? 'perdue' : 'attendue', note: l.note,
         })), t, aPartirDu)
         const marque = `[taux revu le ${libelleJour(jourParis(new Date()))}, rétroactif]`
@@ -1487,8 +1540,8 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
           await tx.$executeRaw`
             update public.cockpit_commissions
             set taux_pct = ${t.tauxPct}::numeric,
-                montant_fixe = ${t.montantFixe === null ? null : versEuros(t.montantFixe)}::numeric,
-                commission_attendue = ${versEuros(c.apres)}::numeric,
+                montant_fixe = ${t.montantFixe === null ? null : numeric(t.montantFixe)}::numeric,
+                commission_attendue = ${numeric(c.apres)}::numeric,
                 note = left(trim(coalesce(note, '') || ' ' || ${marque}), 500)
             where commission_id = ${c.commissionId}::uuid and statut = 'attendue'`
         }

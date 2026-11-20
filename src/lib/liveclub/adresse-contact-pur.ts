@@ -16,7 +16,7 @@
 // l'ancienne et poser la nouvelle dans la meme transaction (adresse-contact.ts).
 
 import { formaterDateFr, normaliserEmail } from './pur'
-import { euros } from '../repartition/pur'
+import { euros, montant as enDevise, type Devise } from '../repartition/pur'
 
 /** Le type d'action de la carte (stripe-actions.ts, agent-cockpit.ts). */
 export const TYPE_ADRESSE_CONTACT = 'adresse_contact'
@@ -141,6 +141,8 @@ export type DepotLu = {
   /** 'YYYY-MM-DD' */
   le: string
   commission: number
+  /** (20/11) Devise du depot et de la commission attendue ; le recu est en euros. EUR si absente. */
+  devise?: Devise
   statut: 'attendue' | 'recue' | 'perdue'
   lotsFaitsLe: string | null
   montantRecu: number | null
@@ -250,7 +252,8 @@ export function lignesDepots(depots: readonly DepotLu[]): string[] {
       : d.statut === 'perdue'
         ? 'perdue'
         : `attendue${d.lotsFaitsLe ? `, lots faits le ${jour(d.lotsFaitsLe)}` : ''}`
-    return `Dépôt ${d.partenaire} de ${eur(d.montant)} le ${jour(d.le)} : commission de ${eur(d.commission)} ${etat}.`
+    const dev = (v: number) => enDevise(Math.round(v * 100), d.devise ?? 'EUR')
+    return `Dépôt ${d.partenaire} de ${dev(d.montant)} le ${jour(d.le)} : commission de ${dev(d.commission)} ${etat}.`
   })
 }
 

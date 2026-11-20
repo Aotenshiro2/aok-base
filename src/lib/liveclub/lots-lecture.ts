@@ -10,6 +10,7 @@ import { fermetureDepotPerduActive, suiviLotsActif } from './config'
 import { DEPOT_PERDU_DEPUIS, etatLots, type EtatLots, type SuiviLots } from './lots-pur'
 import { jourParis } from './passage-regles'
 import { messageErreur, relationAbsente } from './pur'
+import { deviseOuEuro, type Devise } from '../repartition/pur'
 
 /** Un acces broker dont les premiers lots sont attendus, et son premier depot attendu. */
 export type LigneSuiviLots = {
@@ -23,8 +24,10 @@ export type LigneSuiviLots = {
   depotLe: string
   /** Euros (le depot), null si inconnu. */
   montantBase: number | null
-  /** Euros. */
+  /** Dans `devise`. */
   commissionAttendue: number
+  /** (20/11) Devise du depot et de la commission attendue (EUR ou USD). */
+  devise: Devise
   client: string | null
   partenaire: string
   suivi: SuiviLots
@@ -40,7 +43,7 @@ export type LigneSuiviLots = {
 
 type LigneSql = {
   acces_id: string; email: string; telegram_id: bigint | null; debut: string; jusquau: string
-  commission_id: string; depot_le: string; montant_base: number | null; commission_attendue: number
+  commission_id: string; depot_le: string; montant_base: number | null; commission_attendue: number; devise: string | null
   client: string | null; partenaire: string
   entree_le: Date | null; relance2_le: Date | null; declaration_id: bigint | null
   pause_depot: boolean | null
@@ -56,7 +59,7 @@ async function lire(filtre: Prisma.Sql): Promise<LigneSuiviLots[]> {
   const lignes = await prisma.$queryRaw<LigneSql[]>`
     select a.acces_id::text as acces_id, a.email, a.telegram_id, a.debut::text as debut, a.jusquau::text as jusquau,
            c.commission_id::text as commission_id, c.le::text as depot_le, c.montant_base::float8 as montant_base,
-           c.commission_attendue::float8 as commission_attendue, c.client, p.nom as partenaire,
+           c.commission_attendue::float8 as commission_attendue, c.devise, c.client, p.nom as partenaire,
            (select min(j.utilise_le) from public.cockpit_liveclub_jetons j
              where j.acces_id = a.acces_id and j.usage = 'entree' and j.utilise_le is not null) as entree_le,
            (select max(g.fait_le) from public.cockpit_liveclub_gestes g
@@ -74,7 +77,7 @@ async function lire(filtre: Prisma.Sql): Promise<LigneSuiviLots[]> {
                and pd.details->>'acces_id' = a.acces_id::text) as pause_depot
     from public.cockpit_liveclub_acces a
     join lateral (
-      select c1.commission_id, c1.partenaire_id, c1.le, c1.montant_base, c1.commission_attendue, c1.client
+      select c1.commission_id, c1.partenaire_id, c1.le, c1.montant_base, c1.commission_attendue, c1.devise, c1.client
       from public.cockpit_commissions c1
       where c1.acces_id = a.acces_id and c1.nature = 'depot' and c1.statut = 'attendue' and c1.lots_faits_le is null
       order by c1.le, c1.pose_le
@@ -98,6 +101,7 @@ async function lire(filtre: Prisma.Sql): Promise<LigneSuiviLots[]> {
     depotLe: l.depot_le,
     montantBase: l.montant_base,
     commissionAttendue: l.commission_attendue,
+    devise: deviseOuEuro(l.devise),
     client: l.client,
     partenaire: l.partenaire,
     suivi: {
@@ -164,15 +168,17 @@ export type LigneDepotPerdu = {
   commissionId: string
   /** 'YYYY-MM-DD' : le jour du depot. */
   depotLe: string
-  /** Euros (le depot), null si inconnu. */
+  /** Le depot dans `devise`, null si inconnu. */
   montantBase: number | null
+  /** (20/11) Devise du depot. */
+  devise: Devise
   client: string | null
   partenaire: string
 }
 
 type LigneSqlPerdu = {
   acces_id: string; email: string; telegram_id: bigint | null; commission_id: string; depot_le: string
-  montant_base: number | null; client: string | null; partenaire: string
+  montant_base: number | null; devise: string | null; client: string | null; partenaire: string
 }
 
 /**
@@ -186,10 +192,10 @@ async function lireFermes(filtre: Prisma.Sql): Promise<LigneDepotPerdu[]> {
   const lignes = await prisma.$queryRaw<LigneSqlPerdu[]>`
     select a.acces_id::text as acces_id, a.email, a.telegram_id,
            c.commission_id::text as commission_id, c.le::text as depot_le, c.montant_base::float8 as montant_base,
-           c.client, p.nom as partenaire
+           c.devise, c.client, p.nom as partenaire
     from public.cockpit_liveclub_acces a
     join lateral (
-      select c1.commission_id, c1.partenaire_id, c1.le, c1.montant_base, c1.client
+      select c1.commission_id, c1.partenaire_id, c1.le, c1.montant_base, c1.devise, c1.client
       from public.cockpit_commissions c1
       where c1.acces_id = a.acces_id and c1.nature = 'depot' and c1.statut = 'perdue'
         and (coalesce(c1.maj_le, c1.pose_le) at time zone 'Europe/Paris')::date >= ${DEPOT_PERDU_DEPUIS}::date
@@ -210,6 +216,7 @@ async function lireFermes(filtre: Prisma.Sql): Promise<LigneDepotPerdu[]> {
     commissionId: l.commission_id,
     depotLe: l.depot_le,
     montantBase: l.montant_base,
+    devise: deviseOuEuro(l.devise),
     client: l.client,
     partenaire: l.partenaire,
   }))

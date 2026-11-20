@@ -1,5 +1,23 @@
 # ETAT du journal d etudes
 
+## DEPOTS BROKER : LA DEVISE EST GARDEE, LE 70/30 SUR LES EUROS RECUS (20/11/2026, decision de Brice du 12/11, option A ; commite NON pousse, branche devise-depots ; migration NON appliquee)
+
+- Cause : rapport D:\6_Societe\Pilotage\Data-Performance\agent-cockpit\rapport-2026-11-12.md (721 USD convertis a la main par Melanie).
+- Migration : sites/Aoknowledgecom/supabase/migrations/20261120120000_cockpit_commissions_devise.sql (workspace, branche
+  devise-depots) : devise EUR|USD, defaut EUR, sur cockpit_commissions et cockpit_partenaire_taux. A APPLIQUER AVANT de
+  pousser ce code (il lit et ecrit la colonne).
+- repartition/pur.ts : Devise, lireDevise, montant(c, devise) ; parametre devise de depot_broker, commission_affiliation,
+  taux_partenaire (montant fixe) ; marquer_commission recue refuse une autre devise que l'euro ; attendues en dollars
+  comptees a part (commissions.attendues.dollars), jamais additionnees ; un fixe d'une autre devise que le depot = commission
+  a donner (jamais convertie) ; montants ecrits en texte a 2 decimales (numeric()), plus de 650.9299999999999.
+- serveur.ts, pause-depot(.ts, -pur.ts), lots-lecture, lots, adresse-contact : devise lue, ecrite, gardes de doublon par
+  devise, textes en $ ; aucun 70/30 annonce pour une attendue en dollars.
+- Consigne « LES MONTANTS » reecrite (agent-cockpit.ts) : un montant s'inscrit dans la devise dite, jamais de conversion
+  ni de « combien en euros » ; le recu toujours en euros.
+- Correction de la ligne du 12/11 preparee, NON lancee : D:\6_Societe\Pilotage\Data-Performance\agent-cockpit\correction-ligne-2026-11-12.sql.
+- Pas fait : scripts/eval-depot-dollars.mjs garde les criteres du palliatif du 12/11 (D1 attend une demande des euros) :
+  a revoir avant de le rejouer (appels payants).
+
 ## REGISTRE DU GROUPE : LES PSEUDOS SUIVENT, L'AGENT NE CONCLUT PLUS « JAMAIS VU » (17/11/2026, commite NON pousse, branche correctif-pseudos-1711 ; aucune migration)
 
 - Cas reel du 17/11 : Melanie demande une exemption pour un @pseudo ; l'agent repond « jamais vu dans le groupe ».
