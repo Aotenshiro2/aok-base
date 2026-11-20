@@ -28,7 +28,7 @@ Pour ceux qui veulent comprendre pourquoi le prix bouge plutôt que suivre la le
 
 ## Comment y aller
 
-- https://aoknowledge.com/club
+- https://aoknowledge.com/formation
 
 ## Questions fréquentes
 
