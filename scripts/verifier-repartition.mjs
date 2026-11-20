@@ -16,6 +16,7 @@ import {
   etapeApresDepot, etapeApresMarquage,
   etatLitige, litigeDeLigne, jourDuLitige, perteDuLitige, phraseReglement, phraseDeTete,
   lireMoisAcces, MOIS_ACCES_DEFAUT, MOIS_ACCES_MAX,
+  lireDevise, deviseOuEuro, montant, planRetroactif, phraseRetroactif, texteDepotDejaInscrit, nomDevise,
 } from '../src/lib/repartition/pur.ts'
 import { MOIS_ACCES_BROKER } from '../src/lib/liveclub/config.ts'
 import { readFileSync } from 'node:fs'
@@ -344,7 +345,7 @@ test('une commission non recue glisse au mois suivant, une recue compte dans son
   assert.equal(r.lignes[0].genre, 'commission')
   assert.deepEqual(r.lignes[0].enMain, { brice: 0, mel: 24000 })
   assert.deepEqual(r.lignes[0].parts, { brice: 7200, mel: 16800 })
-  assert.deepEqual(r.commissions, { recues: { nb: 1, montant: 24000 }, attendues: { nb: 1, montant: 25000, glissees: 1 } })
+  assert.deepEqual(r.commissions, { recues: { nb: 1, montant: 24000 }, attendues: { nb: 1, montant: 25000, glissees: 1, dollars: { nb: 0, montant: 0 } } })
   assert.equal(r.cotes.mel.commissions, 24000)
   assert.equal(r.solde, 7200)
   // En septembre, la commission recue fin septembre compte, celle d'octobre non.
@@ -620,7 +621,7 @@ test('outils de l agent : parametres valides, refus clairs, validation idempoten
 
   // Depot : l'email est obligatoire (on le demande, on ne l'invente pas).
   const depot = lireParamsRepartition('depot_broker', { partenaire: 'RaiseFx', email: ' Jean@Exemple.fr ', client: 'Jean', montant: '500' }, ctx)
-  assert.deepEqual(depot, { partenaire: 'raisefx', partenaire_nom: 'RaiseFx', email: 'jean@exemple.fr', client: 'Jean', montant: 500, le: '2026-10-08', mois: 6, commission: null, note: null })
+  assert.deepEqual(depot, { partenaire: 'raisefx', partenaire_nom: 'RaiseFx', email: 'jean@exemple.fr', client: 'Jean', montant: 500, devise: 'EUR', le: '2026-10-08', mois: 6, commission: null, note: null })
   assert.ok(lireParamsRepartition('depot_broker', { partenaire: 'RaiseFx', montant: 500 }, ctx).includes('demande-la'))
   assert.equal(typeof lireParamsRepartition('depot_broker', { partenaire: 'RaiseFx', email: 'a@b.fr', montant: 0 }, ctx), 'string')
   assert.equal(typeof lireParamsRepartition('depot_broker', { partenaire: 'RaiseFx', email: 'a@b.fr', montant: 500, le: '2026-10-09' }, ctx), 'string')
@@ -635,7 +636,7 @@ test('outils de l agent : parametres valides, refus clairs, validation idempoten
 
   // Taux : exactement un de taux_pct et montant_fixe.
   assert.deepEqual(lireParamsRepartition('taux_partenaire', { partenaire: 'RaiseFx', nature: 'broker', taux_pct: '50 %' }, ctx),
-    { partenaire: 'raisefx', partenaire_nom: 'RaiseFx', nature: 'broker', taux_pct: 50, montant_fixe: null, a_partir_du: '2026-10-08', accord: null, retroactif: false, note: null })
+    { partenaire: 'raisefx', partenaire_nom: 'RaiseFx', nature: 'broker', taux_pct: 50, montant_fixe: null, devise: 'EUR', a_partir_du: '2026-10-08', accord: null, retroactif: false, note: null })
   assert.equal(typeof lireParamsRepartition('taux_partenaire', { partenaire: 'RaiseFx', taux_pct: 50, montant_fixe: 30 }, ctx), 'string')
   assert.equal(typeof lireParamsRepartition('taux_partenaire', { partenaire: 'RaiseFx' }, ctx), 'string')
   // Un taux peut partir d'une date passee (pour un depot deja fait).
@@ -780,6 +781,128 @@ test('etape humaine suivante, une ligne', () => {
     assert.ok(!t.includes('\n'), 'une seule ligne')
     assert.ok(!HORS_CLAVIER.test(t))
   }
+})
+
+// (20/11) LA DEVISE DES DEPOTS (decision de Brice du 12/11, option A) : la
+// devise est gardee, la commission attendue s'affiche en dollars, le 70/30 se
+// fait sur les euros recus. Aucun taux de change nulle part.
+test('devise des depots : lue, gardee, jamais convertie, 70/30 sur les euros recus', () => {
+  // Lecture de la devise.
+  assert.equal(lireDevise(undefined), 'EUR')
+  assert.equal(lireDevise(''), 'EUR')
+  assert.equal(lireDevise('€'), 'EUR')
+  assert.equal(lireDevise('usd'), 'USD')
+  assert.equal(lireDevise('$'), 'USD')
+  assert.equal(lireDevise('Dollars'), 'USD')
+  assert.equal(lireDevise('GBP'), null)
+  assert.equal(deviseOuEuro('USD'), 'USD')
+  assert.equal(deviseOuEuro(null), 'EUR')
+  assert.equal(montant(72100, 'USD'), '721 $')
+  assert.equal(montant(65093, 'EUR'), '650,93 €')
+  assert.equal(montant(123450, 'USD'), '1 234,50 $')
+
+  // Le cas du 12/11 : 721 USD, commission 650 USD, 5 mois. Carte en dollars, aucune conversion.
+  const ctx = { aujourdhui: '2026-11-12', moisCourant: '2026-11' }
+  const p = lireParamsRepartition('depot_broker', {
+    partenaire: 'RaiseFx', email: 'membre@exemple.test', montant: 721, devise: 'USD', commission: 650, mois: 5,
+  }, ctx)
+  assert.equal(typeof p, 'object')
+  assert.equal(p.devise, 'USD')
+  assert.equal(p.montant, 721)
+  assert.equal(p.commission, 650)
+  const carte = resumeRepartition('depot_broker', p)
+  assert.match(carte, /^Inscrire un dépôt de 721 \$ chez RaiseFx/)
+  assert.match(carte, /commission de ce dépôt : 650 \$\./)
+  assert.match(carte, /En dollars, sans conversion : le 70\/30 se fera sur les euros reçus\./)
+  assert.ok(!/€/.test(carte), 'aucun euro sur une carte en dollars')
+  assert.ok(!HORS_CLAVIER.test(carte))
+  // Sans devise : EUR, comme avant.
+  assert.equal(lireParamsRepartition('depot_broker', { partenaire: 'RaiseFx', email: 'membre@exemple.test', montant: 650 }, ctx).devise, 'EUR')
+  // Une devise illisible : refus en clair.
+  assert.match(lireParamsRepartition('depot_broker', { partenaire: 'RaiseFx', email: 'membre@exemple.test', montant: 650, devise: 'GBP' }, ctx), /^devise : EUR ou USD/)
+  // Le recu est TOUJOURS en euros.
+  const recu = lireParamsRepartition('marquer_commission', {
+    commission_id: '11111111-2222-3333-4444-555555555555', etat: 'recue', montant: 586.48,
+  }, ctx)
+  assert.equal(recu.montant, 586.48)
+  assert.match(lireParamsRepartition('marquer_commission', {
+    commission_id: '11111111-2222-3333-4444-555555555555', etat: 'recue', montant: 650, devise: 'USD',
+  }, ctx), /toujours en euros/)
+
+  // Taux fixe : sa devise ; un fixe en euros ne vaut pas pour un depot en dollars (inconnu, jamais converti).
+  const fixeEur = { tauxPct: null, montantFixe: 40000, devise: 'EUR' }
+  assert.equal(commissionDuTaux(fixeEur, 72100, 'EUR'), 40000)
+  assert.equal(commissionDuTaux(fixeEur, 72100, 'USD'), null)
+  assert.equal(commissionDuTaux({ tauxPct: null, montantFixe: 65000, devise: 'USD' }, 72100, 'USD'), 65000)
+  assert.equal(commissionDuTaux({ tauxPct: 50, montantFixe: null }, 72100, 'USD'), 36050, 'un % suit la devise du depot')
+  assert.equal(commissionDuTaux(fixeEur, null), 40000, 'sans devise demandee : comme avant')
+  assert.equal(libelleTaux({ tauxPct: null, montantFixe: 65000, devise: 'USD' }), '650 $ par client')
+  const t = lireParamsRepartition('taux_partenaire', { partenaire: 'RaiseFx', montant_fixe: 650, devise: 'USD' }, ctx)
+  assert.equal(t.devise, 'USD')
+  assert.match(resumeRepartition('taux_partenaire', t), /: 650 \$ par client à partir du/)
+
+  // La repartition : une attendue en dollars est comptee A PART, jamais dans les euros ;
+  // une fois recue (en euros), elle fait le 70/30 comme une autre.
+  const base = { mois: '2026-11', moisCourant: '2026-11', ventes: [], depenses: [], reglements: [] }
+  const usd = { id: 'u', partenaire: 'RaiseFx', client: 'm', le: '2026-11-12', lotsFaitsLe: null, statut: 'attendue', attendue: 65000, devise: 'USD', recue: null, recueLe: null, encaissePar: 'mel' }
+  const eur = { ...usd, id: 'e', attendue: 40000, devise: 'EUR' }
+  const r = repartitionDuMois({ ...base, commissions: [usd, eur] })
+  assert.deepEqual(r.commissions.attendues, { nb: 1, montant: 40000, glissees: 0, dollars: { nb: 1, montant: 65000 } })
+  assert.equal(r.solde, 0)
+  const recue = { ...usd, statut: 'recue', recue: 58648, recueLe: '2026-11-30' }
+  const r2 = repartitionDuMois({ ...base, commissions: [recue] })
+  assert.equal(r2.cotes.mel.commissions, 58648)
+  assert.deepEqual(r2.lignes[0].parts, partsCommission(58648))
+  assert.match(r2.lignes[0].detail, /attendue 650 \$$/)
+  assert.deepEqual(r2.commissions.attendues.dollars, { nb: 0, montant: 0 })
+
+  // Retroactif : un fixe en euros ne touche pas un depot en dollars.
+  const plan = planRetroactif([
+    { commissionId: 'a', qui: 'x', le: '2026-11-12', base: 72100, attendue: 65000, devise: 'USD', statut: 'attendue', note: null },
+    { commissionId: 'b', qui: 'y', le: '2026-11-12', base: 60000, attendue: 30000, statut: 'attendue', note: null },
+  ], fixeEur, '2026-11-01')
+  assert.deepEqual(plan.touchees.map(c => c.commissionId), ['b'])
+  assert.equal(plan.gardees[0].raison, 'autre devise que le taux')
+  const planUsd = planRetroactif([
+    { commissionId: 'a', qui: 'x', le: '2026-11-12', base: 72100, attendue: 65000, devise: 'USD', statut: 'attendue', note: null },
+  ], { tauxPct: 100, montantFixe: null }, '2026-11-01')
+  assert.match(phraseRetroactif(planUsd, '2026-11-01'), /dépôt de 721 \$ du .* : 650 \$ -> 721 \$/)
+
+  // Le doublon dit la devise.
+  assert.match(texteDepotDejaInscrit({ qui: 'x', partenaire: 'RaiseFx', base: 72100, le: '2026-11-12', attendue: 65000, devise: 'USD', statut: 'attendue', poseLe: null }),
+    /^Ce dépôt est déjà inscrit : 721 \$ chez RaiseFx pour x, le .*, commission 650 \$ \(attendue\)/)
+})
+
+test('doublon de depot : la devise ne compte pas, le refus dit la devise inscrite', () => {
+  // Scenario : la ligne est inscrite 721 USD, la meme capture revient et
+  // l'agent omet la devise (defaut EUR). Ce doit etre le meme depot.
+  assert.equal(lireDevise(undefined), 'EUR')
+  assert.equal(nomDevise('USD'), 'dollars')
+  assert.equal(nomDevise('EUR'), 'euros')
+  const refus = texteDepotDejaInscrit({
+    qui: 'x', partenaire: 'RaiseFx', base: 72100, le: '2026-11-12', attendue: 65000,
+    devise: 'USD', deviseDemandee: lireDevise(undefined), statut: 'attendue', poseLe: null,
+  })
+  assert.match(refus, /^Ce dépôt est déjà inscrit en dollars, pas en euros : 721 \$ chez RaiseFx/)
+  assert.match(refus, /Rien n'a été refait/)
+  assert.match(refus, /n'en inscris pas une seconde/)
+  // Meme devise : le refus ordinaire, sans mention de devise.
+  assert.doesNotMatch(texteDepotDejaInscrit({ qui: 'x', partenaire: 'RaiseFx', base: 72100, le: '2026-11-12', attendue: 65000, devise: 'USD', deviseDemandee: 'USD', statut: 'attendue', poseLe: null }), /en dollars/)
+
+  // Les gardes en base ne filtrent plus sur la devise (sinon le doublon passe).
+  const rep = readFileSync(new URL('../src/lib/repartition/serveur.ts', import.meta.url), 'utf8')
+  const garde = rep.slice(rep.indexOf('async function depotDejaInscrit('), rep.indexOf('async function commissionsDepuis('))
+  assert.ok(garde.includes('c.montant_base = ${numeric(base)}::numeric'))
+  assert.doesNotMatch(garde, /devise = \$\{devise\}/)
+  assert.match(garde, /deviseDemandee: devise/)
+  const debut = rep.indexOf('Sans la devise, comme la garde')
+  assert.ok(debut > 0)
+  const final = rep.slice(debut, rep.indexOf('insert into public.cockpit_commissions', debut))
+  assert.ok(final.length > 0)
+  assert.doesNotMatch(final, /devise = \$\{devise\}/)
+  assert.match(final, /en \$\{nomDevise\(inscrite\)\}, pas en \$\{nomDevise\(devise\)\}/)
+  const pd = readFileSync(new URL('../src/lib/liveclub/pause-depot.ts', import.meta.url), 'utf8')
+  assert.doesNotMatch(pd, /c\.devise = \$\{/)
 })
 
 console.log(`\n${n} blocs verifies, tout est bon.`)

@@ -808,7 +808,7 @@ export async function aFaire(c: Ctx): Promise<Sortie> {
     select ${H('cree_le')} as cree_le, auteur, texte from public.cockpit_demandes where statut = 'nouvelle' order by cree_le desc limit 30`))
   const commissions = await facultatif(notes, 'cockpit_commissions', () => q(tx, `
     select c.partenaire_id as partenaire, coalesce(c.client, ac.email, c.email) as client, ${D('c.le')} as depot_le,
-      c.montant_base::float as depot, c.commission_attendue::float as commission_attendue, ${D('c.lots_faits_le')} as lots_faits_le
+      c.montant_base::float as depot, c.commission_attendue::float as commission_attendue, c.devise, ${D('c.lots_faits_le')} as lots_faits_le
     from public.cockpit_commissions c left join public.cockpit_liveclub_acces ac on ac.acces_id = c.acces_id
     where c.statut = 'attendue' order by c.le limit 50`))
   const litiges = await facultatif(notes, 'cockpit_litiges', () => q(tx, `

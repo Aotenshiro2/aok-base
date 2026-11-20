@@ -69,11 +69,11 @@ async function contactEnCours(db: Db, accesId: string): Promise<string | null> {
 /** Les depots inscrits sur l'acces et leur commission (5 au plus), pour la carte. */
 async function depotsDe(db: Db, accesId: string): Promise<DepotLu[]> {
   const l = await db.$queryRaw<{
-    partenaire: string; montant: number; le: string; commission: number; statut: string
+    partenaire: string; montant: number; le: string; commission: number; devise: string | null; statut: string
     lots_faits_le: string | null; montant_recu: number | null; recue_le: string | null
   }[]>`
     select coalesce(p.nom, c.partenaire_id) as partenaire, c.montant_base::float8 as montant,
-      to_char(c.le, 'YYYY-MM-DD') as le, c.commission_attendue::float8 as commission, c.statut,
+      to_char(c.le, 'YYYY-MM-DD') as le, c.commission_attendue::float8 as commission, c.devise, c.statut,
       to_char(c.lots_faits_le, 'YYYY-MM-DD') as lots_faits_le, c.montant_recu::float8 as montant_recu,
       to_char(c.recue_le, 'YYYY-MM-DD') as recue_le
     from public.cockpit_commissions c
@@ -83,6 +83,7 @@ async function depotsDe(db: Db, accesId: string): Promise<DepotLu[]> {
     limit 5`
   return l.map(d => ({
     partenaire: d.partenaire, montant: Number(d.montant), le: d.le, commission: Number(d.commission),
+    devise: d.devise === 'USD' ? 'USD' : 'EUR',
     statut: d.statut === 'recue' || d.statut === 'perdue' ? d.statut : 'attendue',
     lotsFaitsLe: d.lots_faits_le, montantRecu: d.montant_recu === null ? null : Number(d.montant_recu), recueLe: d.recue_le,
   }))

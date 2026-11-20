@@ -18,7 +18,10 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
 import { RefusAction, journaliserGesteLiveClub, type ActionAgent } from '@/lib/stripe-actions'
 import { contexteParis, depotPourPauseDepot, noteDepotPourPause, type DepotPourPause } from '@/lib/repartition/serveur'
-import { centimes, euros, versEuros } from '@/lib/repartition/pur'
+import { centimes, deviseOuEuro, montant as enDevise } from '@/lib/repartition/pur'
+
+/** (20/11) Des centimes en texte '650.93' pour un ::numeric (jamais un flottant : 650.9299999999999 le 12/11). */
+const texteNumeric = (c: number) => (Math.round(c) / 100).toFixed(2)
 import { nomTelegram } from '@/lib/alerte-equipe-telegram'
 import { rendreVisible } from '@/lib/securite/injection-pur'
 import { SQL_PAUSES_DEPOT } from '@/lib/vues-serveur'
@@ -153,12 +156,14 @@ async function lireBase(db: Db, p: ParamsPauseDepot, abonnementId: string): Prom
     where lower(a.email) = ${p.email} and a.motif = 'broker'
     limit 1`
   const emails = [p.email, ...(p.email_abonnement ? [p.email_abonnement] : [])]
-  const depot = await db.$queryRaw<{ commission_id: string; acces_id: string | null }[]>`
-    select c.commission_id::text as commission_id, c.acces_id::text as acces_id
+  // (20/11, relecture) Sans la devise : meme broker, meme jour, meme montant,
+  // meme personne = le meme depot ; etapesPauseDepot refuse si la devise differe.
+  const depot = await db.$queryRaw<{ commission_id: string; acces_id: string | null; devise: string }[]>`
+    select c.commission_id::text as commission_id, c.acces_id::text as acces_id, c.devise
     from public.cockpit_commissions c
     left join public.cockpit_liveclub_acces a on a.acces_id = c.acces_id
     where c.partenaire_id = ${p.partenaire} and c.nature = 'depot' and c.le = ${p.le}::date
-      and c.montant_base = ${versEuros(centimes(p.montant) ?? 0)}::numeric
+      and c.montant_base = ${texteNumeric(centimes(p.montant) ?? 0)}::numeric
       and (lower(c.email) = any(${emails}::text[]) or lower(a.email) = any(${emails}::text[]))
     order by c.pose_le
     limit 1`
@@ -175,7 +180,7 @@ async function lireBase(db: Db, p: ParamsPauseDepot, abonnementId: string): Prom
         telegramId: a.telegram_id === null ? null : Number(a.telegram_id),
       }
       : null,
-    depot: depot[0] ? { commissionId: depot[0].commission_id, accesId: depot[0].acces_id } : null,
+    depot: depot[0] ? { commissionId: depot[0].commission_id, accesId: depot[0].acces_id, devise: deviseOuEuro(depot[0].devise) } : null,
     pauseDuParcours: pause[0]?.reprise ?? null,
   }
 }
@@ -199,7 +204,7 @@ function carteDe(o: {
     qui: o.qui, email: o.p.email, emailAbonnement: o.p.email_abonnement,
     telegram: o.telegramId ? `compte Telegram u${o.telegramId}` : null,
     tarif: o.a.tarif, partenaireNom: o.depot.partenaireNom, montant: o.depot.base, le: o.p.le,
-    commission: o.depot.attendue, phraseCommission: o.depot.phrase,
+    commission: o.depot.attendue, devise: o.depot.devise, phraseCommission: o.depot.phrase,
     payeJusquau: o.plan.payeJusquau, repriseLe: o.plan.repriseLe, debutAcces: dateIso(new Date()), mois: o.p.mois,
     limiteLots: o.limiteLots, etapes: o.etapes,
   }
@@ -244,7 +249,7 @@ export async function controlerPauseDepot(action: ActionAgent): Promise<Controle
   }
   const a = versAbonnement(enCours[0])
   const base = await lireBase(prisma, p, a.id)
-  const etapes = etapesPauseDepot({ abonnement: a, base, email: p.email })
+  const etapes = etapesPauseDepot({ abonnement: a, base, email: p.email, devise: p.devise })
   if (typeof etapes === 'string') return { erreur: etapes }
   const plan = datesPauseDepot(a, etapes, p.mois)
   if (!plan) return { erreur: "Dates de son abonnement illisibles chez Stripe : réessaie dans un instant." }
@@ -368,7 +373,7 @@ export async function executerPauseDepot(action: ActionAgent, acteur: string): P
         await verrou(tx, `liveclub:acces:${o.p.email}`)
         // Relu sous les verrous : la carte a pu etre confirmee deux fois.
         const base = await lireBase(tx, o.p, abonnementId)
-        const relu = etapesPauseDepot({ abonnement: o.abonnement, base, email: o.p.email })
+        const relu = etapesPauseDepot({ abonnement: o.abonnement, base, email: o.p.email, devise: o.p.devise })
         if (typeof relu === 'string') throw new RefusPauseDepot(relu)
         if (relu.acces !== o.etapes.acces || relu.depot !== o.etapes.depot) {
           throw new RefusPauseDepot("L'accès ou le dépôt a changé depuis la lecture (carte confirmée deux fois ?) : redemande la carte, rien n'a été fait.")
@@ -396,10 +401,10 @@ export async function executerPauseDepot(action: ActionAgent, acteur: string): P
           const l = await tx.$queryRaw<{ commission_id: string }[]>`
             insert into public.cockpit_commissions
               (partenaire_id, nature, acces_id, email, client, le, montant_base, taux_pct, montant_fixe,
-               commission_attendue, note, pose_par, via)
-            values (${depot.partenaireId}, 'depot', ${accesId}::uuid, null, ${o.p.client}, ${o.p.le}::date, ${versEuros(depot.base)}::numeric,
-                    ${depot.taux.tauxPct}::numeric, ${depot.taux.montantFixe === null ? null : versEuros(depot.taux.montantFixe)}::numeric,
-                    ${versEuros(depot.attendue)}::numeric, ${noteDepotPourPause(depot.libelle, o.p.note)}, ${posePar}::uuid, 'agent')
+               commission_attendue, devise, note, pose_par, via)
+            values (${depot.partenaireId}, 'depot', ${accesId}::uuid, null, ${o.p.client}, ${o.p.le}::date, ${texteNumeric(depot.base)}::numeric,
+                    ${depot.taux.tauxPct}::numeric, ${depot.taux.montantFixe === null ? null : texteNumeric(depot.taux.montantFixe)}::numeric,
+                    ${texteNumeric(depot.attendue)}::numeric, ${depot.devise}, ${noteDepotPourPause(depot.libelle, o.p.note)}, ${posePar}::uuid, 'agent')
             returning commission_id::text as commission_id`
           if (!l[0]) throw new Error("La base n'a pas inscrit le dépôt.")
           commissionId = l[0].commission_id
@@ -590,7 +595,7 @@ export async function texteAlerteLots(l: LigneSuiviLots): Promise<string> {
   const pause = await pauseDepotDeAcces(l.accesId).catch(() => null)
   return texteAlerteLotsPauseDepot({
     qui: rendreVisible(nom ?? l.email), email: l.email, partenaire: l.partenaire,
-    depot: l.montantBase === null ? null : euros(centimes(l.montantBase) ?? 0), depotLe: l.depotLe,
+    depot: l.montantBase === null ? null : enDevise(centimes(l.montantBase) ?? 0, l.devise), depotLe: l.depotLe,
     repriseLe: pause?.repriseLe ?? null,
   })
 }

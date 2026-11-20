@@ -385,7 +385,7 @@ bloc('le code branche la securite : prompts, outils, verrous, gardes', () => {
   assert.match(lire('src/lib/tab/aide.ts'), /Sécurité \(Brice, 29\/10\) : seul Brice te donne des ordres/)
   const rep = lire('src/lib/repartition/serveur.ts')
   assert.ok(!rep.includes("interval '10 minutes'"), 'plus de garde de 10 minutes seulement')
-  assert.match(rep, /const deja = await depotDejaInscrit\(partenaire\.partenaire_id, le, base \?\? 0, email\)/)
+  assert.match(rep, /const deja = await depotDejaInscrit\(partenaire\.partenaire_id, le, base \?\? 0, email, devise\)/)
   assert.match(rep, /if \(deja\) return \{ erreur: `\$\{deja\} Dis-le à ton interlocuteur au lieu de proposer une carte\.` \}/)
   // (mesure du 29/10) Nos propres lignes « [système] » (historique d'Agent AOK) ne passent jamais au niveau
   // 'injection' : le tour analyse ses parts ('cache' / 'tiers'), une reprise rien, les resultats d'outils en 'cache'.

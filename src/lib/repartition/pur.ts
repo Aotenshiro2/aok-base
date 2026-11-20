@@ -131,6 +131,41 @@ export function euros(c: number): string {
   return `${signe}${entier}${reste ? `,${String(reste).padStart(2, '0')}` : ''} €`
 }
 
+// (20/11, decision de Brice du 12/11, option A) LA DEVISE D'UN DEPOT BROKER.
+// « La devise est gardee, la commission attendue s'affiche en dollars, et le
+// 70/30 se fait sur les euros reellement recus. Aucun taux de change. » Un
+// depot, sa commission attendue et un montant fixe de taux sont dans la devise
+// dite (EUR ou USD, colonne devise de cockpit_commissions et de
+// cockpit_partenaire_taux). Le montant RECU est toujours en euros : c'est lui,
+// et lui seul, qui entre dans le 70/30. Rien n'est jamais converti.
+
+export const DEVISES = ['EUR', 'USD'] as const
+export type Devise = (typeof DEVISES)[number]
+
+/** 'EUR' par defaut (vide) ; 'usd', '$', 'dollars' -> 'USD' ; '€', 'euros' -> 'EUR' ; null si illisible. */
+export function lireDevise(v: unknown): Devise | null {
+  const s = v === null || v === undefined ? '' : String(v).trim().toLowerCase().replace(/\s+/g, '')
+  if (!s || s === 'eur' || s === '€' || s === 'euro' || s === 'euros') return 'EUR'
+  if (s === 'usd' || s === '$' || s === 'us$' || s === 'dollar' || s === 'dollars') return 'USD'
+  return null
+}
+
+/** Une devise lue en base ou dans un JSON : 'USD' seulement si c'est dit, 'EUR' sinon. */
+export function deviseOuEuro(v: unknown): Devise {
+  return v === 'USD' ? 'USD' : 'EUR'
+}
+
+/** Comme euros(), dans la devise donnee : 72100 USD -> '721 $', 65093 EUR -> '650,93 €'. */
+export function montant(c: number, devise: Devise = 'EUR'): string {
+  const e = euros(c)
+  return devise === 'USD' ? `${e.slice(0, -1)}$` : e
+}
+
+/** 'euros' ou 'dollars', pour les phrases (« déjà inscrit en dollars »). */
+export function nomDevise(devise: Devise): string {
+  return devise === 'USD' ? 'dollars' : 'euros'
+}
+
 /** « 50 » -> '50 %', 12.5 -> '12,5 %'. */
 export function pourcent(p: number): string {
   return `${String(Math.round(p * 100) / 100).replace('.', ',')} %`
@@ -408,6 +443,8 @@ export type TauxPartenaire = {
   tauxPct: number | null
   /** Centimes par client ; exclusif avec tauxPct. */
   montantFixe: number | null
+  /** (20/11) La devise du montant fixe ; EUR si absente. Sans objet pour un %. */
+  devise?: Devise
   poseLe?: string | null
 }
 
@@ -427,16 +464,19 @@ export function tauxEnVigueur(
  * fixe. null = impossible (un % sans base).
  */
 export function commissionDuTaux(
-  t: { tauxPct: number | null; montantFixe: number | null }, base: number | null,
+  t: { tauxPct: number | null; montantFixe: number | null; devise?: Devise }, base: number | null, devise?: Devise,
 ): number | null {
-  if (t.montantFixe !== null) return t.montantFixe
+  // (20/11) Un % suit la devise du depot ; un montant fixe n'a de sens que
+  // dans sa devise : un fixe en euros sur un depot en dollars = inconnu
+  // (jamais de conversion), la commission de ce depot doit etre donnee.
+  if (t.montantFixe !== null) return devise && (t.devise ?? 'EUR') !== devise ? null : t.montantFixe
   if (t.tauxPct === null || base === null) return null
   return arrondi((base * t.tauxPct) / 100)
 }
 
-/** '50 % du dépôt' ou '30 € par client'. */
-export function libelleTaux(t: { tauxPct: number | null; montantFixe: number | null }, nature: 'depot' | 'affiliation' = 'depot'): string {
-  if (t.montantFixe !== null) return `${euros(t.montantFixe)} par client`
+/** '50 % du dépôt' ou '30 € par client' (ou '650 $ par client'). */
+export function libelleTaux(t: { tauxPct: number | null; montantFixe: number | null; devise?: Devise }, nature: 'depot' | 'affiliation' = 'depot'): string {
+  if (t.montantFixe !== null) return `${montant(t.montantFixe, t.devise ?? 'EUR')} par client`
   return `${pourcent(t.tauxPct ?? 0)} ${nature === 'depot' ? 'du dépôt' : 'de la vente'}`
 }
 
@@ -517,9 +557,11 @@ export type Commission = {
   le: string
   lotsFaitsLe: string | null
   statut: StatutCommission
-  /** Centimes attendus (taux fige a l'inscription). */
+  /** Centimes attendus (taux fige a l'inscription), dans `devise`. */
   attendue: number
-  /** Centimes recus (statut recue). */
+  /** (20/11) La devise du depot et de la commission attendue ; EUR si absente. */
+  devise?: Devise
+  /** Centimes recus (statut recue), TOUJOURS en euros : ce qui est arrive sur le compte. */
   recue: number | null
   recueLe: string | null
   /** Qui a touche l'argent : Mel sauf indication. */
@@ -800,8 +842,12 @@ export type Repartition = {
   }
   commissions: {
     recues: { nb: number; montant: number }
-    /** Les attendues a ce jour (toutes glissent au plus tot vers le mois courant). */
-    attendues: { nb: number; montant: number; glissees: number }
+    /**
+     * Les attendues a ce jour (toutes glissent au plus tot vers le mois
+     * courant). nb et montant : celles en EUROS. dollars : celles en USD, a
+     * part (jamais additionnees aux euros, aucun taux). glissees : toutes.
+     */
+    attendues: { nb: number; montant: number; glissees: number; dollars: { nb: number; montant: number } }
   }
   lignes: LigneGrandLivre[]
   avertissements: string[]
@@ -931,11 +977,18 @@ export function repartitionDuMois(e: EntreeRepartition): Repartition {
   }
 
   // Commissions : recues ce mois (elles comptent ici), attendues (a suivre).
-  let nbRecues = 0, recues = 0, nbAttendues = 0, attendues = 0, glissees = 0
+  // (20/11) Les attendues en dollars sont comptees a part ; une recue est
+  // toujours en euros (le montant arrive), c'est elle qui fait le 70/30.
+  let nbRecues = 0, recues = 0, nbAttendues = 0, attendues = 0, glissees = 0, nbDollars = 0, dollars = 0
   for (const c of [...e.commissions].sort((a, b) => a.le.localeCompare(b.le))) {
     if (c.statut === 'attendue') {
-      nbAttendues += 1
-      attendues += c.attendue
+      if (c.devise === 'USD') {
+        nbDollars += 1
+        dollars += c.attendue
+      } else {
+        nbAttendues += 1
+        attendues += c.attendue
+      }
       if (glissementCommission(c, e.moisCourant)) glissees += 1
       continue
     }
@@ -955,7 +1008,7 @@ export function repartitionDuMois(e: EntreeRepartition): Repartition {
       cote: 'mel',
       enMain,
       parts,
-      detail: `reçue le ${libelleJour(c.recueLe ?? '')} par ${NOM_COTE[c.encaissePar]}, attendue ${euros(c.attendue)}`,
+      detail: `reçue le ${libelleJour(c.recueLe ?? '')} par ${NOM_COTE[c.encaissePar]}, attendue ${montant(c.attendue, c.devise ?? 'EUR')}`,
     })
   }
 
@@ -1191,7 +1244,7 @@ export function repartitionDuMois(e: EntreeRepartition): Repartition {
     litiges,
     commissions: {
       recues: { nb: nbRecues, montant: recues },
-      attendues: { nb: nbAttendues, montant: attendues, glissees },
+      attendues: { nb: nbAttendues, montant: attendues, glissees, dollars: { nb: nbDollars, montant: dollars } },
     },
     lignes,
     avertissements,
@@ -1238,13 +1291,20 @@ function texteCourt(v: unknown, max: number): string | null {
 
 /** Euros a 2 decimales dans ]min, max], ou le message d'erreur. */
 function lireEuros(v: unknown, nom: string, o: { min?: number; max: number; zeroAccepte?: boolean }): number | string {
+  return lireMontant(v, nom, 'EUR', o)
+}
+
+/** (20/11) Un montant a 2 decimales dans la devise donnee (jamais converti), ou le message d'erreur. */
+function lireMontant(v: unknown, nom: string, devise: Devise, o: { min?: number; max: number; zeroAccepte?: boolean }): number | string {
   const c = centimes(v)
-  if (c === null) return `${nom} : un montant en euros (ex. 500 ou 49,90).`
+  if (c === null) return `${nom} : un montant en ${devise === 'USD' ? 'dollars' : 'euros'} (ex. 500 ou 49,90).`
   const min = o.min ?? 0
   if (o.zeroAccepte ? c < min * 100 : c <= min * 100) return `${nom} : un montant ${o.zeroAccepte ? 'positif ou nul' : 'positif'}.`
-  if (c > o.max * 100) return `${nom} : ${euros(o.max * 100)} au plus.`
+  if (c > o.max * 100) return `${nom} : ${montant(o.max * 100, devise)} au plus.`
   return versEuros(c)
 }
+
+const MESSAGE_DEVISE = "devise : EUR ou USD, celle que donne le relevé (vide = EUR). Jamais de conversion : un montant en dollars s'inscrit en USD."
 
 /** Un jour 'YYYY-MM-DD', le defaut si vide ; jamais apres `auPlusTard` s'il est donne. */
 function lireJour(v: unknown, nom: string, defaut: string, auPlusTard?: string): string | string[] {
@@ -1317,12 +1377,15 @@ export function lireParamsRepartition(
     const jour = lireJour(p.le, 'le', ctx.aujourdhui, ctx.aujourdhui)
     if (typeof jour === 'string') return jour
     const client = texteCourt(p.client, 120)
+    // (20/11) La devise du depot (ou de la vente) et de sa commission.
+    const devise = lireDevise(p.devise)
+    if (!devise) return MESSAGE_DEVISE
     if (type === 'depot_broker') {
       const email = lireEmail(p.email)
       if (!email) {
         return "email : l'adresse email du client, nécessaire pour son accès au Live Club. Si elle n'est pas donnée, demande-la, n'en invente jamais."
       }
-      const montant = lireEuros(p.montant, 'montant (le dépôt)', { max: 1000000 })
+      const montant = lireMontant(p.montant, 'montant (le dépôt)', devise, { max: 1000000 })
       if (typeof montant === 'string') return montant
       // (29/10) La duree de l'acces pose avec le depot, et la commission
       // propre a CE depot quand elle est donnee (« on prend 400 EUR »).
@@ -1330,21 +1393,21 @@ export function lireParamsRepartition(
       if (typeof mois === 'string') return mois
       let commission: number | null = null
       if (p.commission !== null && p.commission !== undefined && p.commission !== '') {
-        const c = lireEuros(p.commission, 'commission (celle de ce dépôt)', { max: 100000, zeroAccepte: true })
+        const c = lireMontant(p.commission, 'commission (celle de ce dépôt)', devise, { max: 100000, zeroAccepte: true })
         if (typeof c === 'string') return c
         commission = c
       }
-      return { partenaire, partenaire_nom: partenaireNom, email, client, montant, le: jour[0], mois, commission, note }
+      return { partenaire, partenaire_nom: partenaireNom, email, client, montant, devise, le: jour[0], mois, commission, note }
     }
     // Affiliation : la base n'est utile qu'a un taux en % (le serveur le dit).
     let montant: number | null = null
     if (p.montant !== null && p.montant !== undefined && p.montant !== '') {
-      const m = lireEuros(p.montant, 'montant (la vente affiliée)', { max: 1000000 })
+      const m = lireMontant(p.montant, 'montant (la vente affiliée)', devise, { max: 1000000 })
       if (typeof m === 'string') return m
       montant = m
     }
     if (!client) return 'client : qui a été apporté (nom ou email), pour que la commission soit reconnaissable.'
-    return { partenaire, partenaire_nom: partenaireNom, client, montant, le: jour[0], note }
+    return { partenaire, partenaire_nom: partenaireNom, client, montant, devise, le: jour[0], note }
   }
 
   if (type === 'marquer_commission') {
@@ -1362,8 +1425,13 @@ export function lireParamsRepartition(
     const regulariser = p.regulariser === true && (etat === 'attendue' || etat === 'lots_faits')
     if (etat === 'attendue') return { commission_id: id, etat, le: jour[0], qui, note, ...(regulariser ? { regulariser } : {}) }
     if (etat === 'recue') {
+      // (20/11) Le recu est TOUJOURS en euros (ce qui est arrive sur le
+      // compte), meme pour une commission attendue en dollars.
+      if (lireDevise(p.devise) !== 'EUR') {
+        return "montant (reçu) : toujours en euros, ce qui est arrivé sur le compte, même pour une commission attendue en dollars. Demande les euros reçus."
+      }
       const montant = lireEuros(p.montant, 'montant (reçu)', { max: 10000000, zeroAccepte: true })
-      if (typeof montant === 'string') return `${montant} Demande le montant réellement reçu.`
+      if (typeof montant === 'string') return `${montant} Demande le montant réellement reçu, en euros.`
       const encaissePar = p.encaisse_par === null || p.encaisse_par === undefined || p.encaisse_par === ''
         ? 'mel' : lireCote(p.encaisse_par)
       if (!encaissePar) return 'encaisse_par : brice ou mel (Mel par défaut).'
@@ -1415,15 +1483,19 @@ export function lireParamsRepartition(
       const t = Number(String(p.taux_pct).replace(',', '.').replace('%', '').trim())
       if (!Number.isFinite(t) || t < 0 || t > 500) return 'taux_pct : un pourcentage entre 0 et 500 (ex. 50 pour 50 % du dépôt).'
       tauxPct = Math.round(t * 100) / 100
-    } else {
-      const m = lireEuros(p.montant_fixe, 'montant_fixe', { max: 100000, zeroAccepte: true })
+    }
+    // (20/11) La devise d'un montant fixe (EUR par defaut) ; un % n'en a pas.
+    const devise = aFixe ? lireDevise(p.devise) : 'EUR'
+    if (!devise) return MESSAGE_DEVISE
+    if (aFixe) {
+      const m = lireMontant(p.montant_fixe, 'montant_fixe', devise, { max: 100000, zeroAccepte: true })
       if (typeof m === 'string') return m
       montantFixe = m
     }
     const jour = lireJour(p.a_partir_du, 'a_partir_du', ctx.aujourdhui)
     if (typeof jour === 'string') return jour
     return {
-      partenaire, partenaire_nom: partenaireNom, nature, taux_pct: tauxPct, montant_fixe: montantFixe, a_partir_du: jour[0],
+      partenaire, partenaire_nom: partenaireNom, nature, taux_pct: tauxPct, montant_fixe: montantFixe, devise, a_partir_du: jour[0],
       accord, retroactif, note,
     }
   }
@@ -1534,20 +1606,29 @@ export function lireParamsRepartition(
 }
 
 const eur = (v: unknown) => euros(centimes(v) ?? 0)
+/** (20/11) Un montant de la carte dans la devise de ses parametres (EUR si absente). */
+const enDevise = (v: unknown, p: Record<string, unknown>) => montant(centimes(v) ?? 0, deviseOuEuro(p.devise))
+/** Le taux d'une carte taux_partenaire, avec la devise de son montant fixe. */
+const tauxDeCarte = (p: Record<string, unknown>) => ({
+  tauxPct: (p.taux_pct as number | null) ?? null,
+  montantFixe: p.montant_fixe === null || p.montant_fixe === undefined ? null : centimes(p.montant_fixe),
+  devise: deviseOuEuro(p.devise),
+})
 
 /** Le texte de la carte de confirmation (sans le complement calcule par le serveur). */
 export function resumeRepartition(type: TypeRepartition, p: Record<string, unknown>): string {
   const note = p.note ? ` Note : ${p.note}` : ''
   switch (type) {
     case 'depot_broker':
-      return `Inscrire un dépôt de ${eur(p.montant)} chez ${p.partenaire_nom}, le ${libelleJour(String(p.le))}, `
+      return `Inscrire un dépôt de ${enDevise(p.montant, p)} chez ${p.partenaire_nom}, le ${libelleJour(String(p.le))}, `
         + `pour ${p.client ? `${p.client} (${p.email})` : p.email}`
-        + `${p.commission !== null && p.commission !== undefined ? `, commission de ce dépôt : ${eur(p.commission)}` : ''}. `
+        + `${p.commission !== null && p.commission !== undefined ? `, commission de ce dépôt : ${enDevise(p.commission, p)}` : ''}. `
+        + (p.devise === 'USD' ? 'En dollars, sans conversion : le 70/30 se fera sur les euros reçus. ' : '')
         + `Si cette adresse n'a jamais eu d'accès broker, elle reçoit ${libelleMoisAcces(p.mois)} de Live Club à partir d'aujourd'hui `
         + `et son email d'invitation part tout de suite (non renouvelable).${note}`
     case 'commission_affiliation':
       return `Inscrire une commission d'affiliation ${p.partenaire_nom} pour ${p.client}, le ${libelleJour(String(p.le))}`
-        + `${p.montant !== null && p.montant !== undefined ? `, sur une vente de ${eur(p.montant)}` : ''}.${note}`
+        + `${p.montant !== null && p.montant !== undefined ? `, sur une vente de ${enDevise(p.montant, p)}` : ''}.${note}`
     case 'marquer_commission':
       // (31/10) Regularisation d'une commission perdue : elle redevient attendue.
       if (p.etat === 'attendue') return `Remettre la commission${p.qui ? ` de ${p.qui}` : ''} en attendue (régularisation) : elle revient dans les commissions attendues.${note}`
@@ -1574,7 +1655,7 @@ export function resumeRepartition(type: TypeRepartition, p: Record<string, unkno
         return `Enregistrer le nouveau partenaire ${p.partenaire_nom} (${p.nature}), sans taux général pour l'instant : `
           + `la commission de chaque dépôt sera donnée avec lui, jusqu'à ce qu'un taux soit posé.${note}`
       }
-      const t = { tauxPct: (p.taux_pct as number | null) ?? null, montantFixe: p.montant_fixe === null || p.montant_fixe === undefined ? null : centimes(p.montant_fixe) }
+      const t = tauxDeCarte(p)
       return `Taux de ${p.partenaire_nom}${p.nature ? ` (${p.nature})` : ''} : ${libelleTaux(t)} à partir du ${depuis}. `
         + (p.retroactif === true
           ? `RÉTROACTIF : les commissions encore attendues des dépôts inscrits depuis le ${depuis} prennent ce taux (liste ci-dessous) ; celles déjà reçues ou perdues ne bougent pas.`
@@ -1639,11 +1720,11 @@ export function resumeCourtRepartition(type: TypeRepartition, p: Record<string, 
   const jour = (v: unknown) => jourCourt(String(v))
   switch (type) {
     case 'depot_broker':
-      return `Dépôt ${p.partenaire_nom} de ${eur(p.montant)} le ${jour(p.le)} pour ${p.email}`
-        + `${p.commission !== null && p.commission !== undefined ? `, commission ${eur(p.commission)}` : ''}. `
+      return `Dépôt ${p.partenaire_nom} de ${enDevise(p.montant, p)} le ${jour(p.le)} pour ${p.email}`
+        + `${p.commission !== null && p.commission !== undefined ? `, commission ${enDevise(p.commission, p)}` : ''}. `
         + `Accès Live Club ${libelleMoisAcces(p.mois)} et email d'invitation, si l'adresse n'a jamais eu d'accès broker.`
     case 'commission_affiliation':
-      return `Affiliation ${p.partenaire_nom} : ${p.client}, le ${jour(p.le)}${p.montant !== null && p.montant !== undefined ? `, vente de ${eur(p.montant)}` : ''}.`
+      return `Affiliation ${p.partenaire_nom} : ${p.client}, le ${jour(p.le)}${p.montant !== null && p.montant !== undefined ? `, vente de ${enDevise(p.montant, p)}` : ''}.`
     case 'marquer_commission':
       if (p.etat === 'attendue') return `Commission de nouveau attendue${p.qui ? ` : ${p.qui}` : ''} (régularisation).`
       if (p.etat === 'lots_faits' && p.regulariser === true) return `Régularisation : lots faits le ${jour(p.le)}, commission de nouveau attendue${p.qui ? ` (${p.qui})` : ''}.`
@@ -1658,7 +1739,7 @@ export function resumeCourtRepartition(type: TypeRepartition, p: Record<string, 
           ? `Accord ${p.partenaire_nom} à partir du ${depuis} : ${p.accord}.`
           : `Nouveau partenaire ${p.partenaire_nom} (${p.nature}), sans taux pour l'instant.`
       }
-      const t = { tauxPct: (p.taux_pct as number | null) ?? null, montantFixe: p.montant_fixe === null || p.montant_fixe === undefined ? null : centimes(p.montant_fixe) }
+      const t = tauxDeCarte(p)
       return `${p.partenaire_nom}${p.nature ? ` (${p.nature})` : ''} : ${libelleTaux(t)} à partir du ${depuis}. Les dépôts déjà inscrits ne changent pas.`
     }
     case 'intervenant':
@@ -1738,6 +1819,8 @@ export type CommissionRetro = {
   base: number | null
   /** Centimes. */
   attendue: number
+  /** (20/11) Devise de la base et de l'attendue ; EUR si absente. */
+  devise?: Devise
   statut: 'attendue' | 'recue' | 'perdue'
   note: string | null
 }
@@ -1750,14 +1833,16 @@ export type PlanRetroactif = {
 
 /** Ce que ferait un nouveau taux retroactif sur les commissions d'un partenaire depuis sa date d'effet. */
 export function planRetroactif(
-  lignes: readonly CommissionRetro[], t: { tauxPct: number | null; montantFixe: number | null }, depuis: string,
+  lignes: readonly CommissionRetro[], t: { tauxPct: number | null; montantFixe: number | null; devise?: Devise }, depuis: string,
 ): PlanRetroactif {
   const plan: PlanRetroactif = { touchees: [], gardees: [] }
   for (const c of lignes) {
     if (c.le < depuis) continue
     if (c.statut !== 'attendue') { plan.gardees.push({ ...c, raison: c.statut === 'recue' ? 'déjà reçue' : 'perdue' }); continue }
     if ((c.note ?? '').includes(MARQUE_COMMISSION_PROPRE)) { plan.gardees.push({ ...c, raison: 'commission propre à ce dépôt' }); continue }
-    const apres = commissionDuTaux(t, c.base)
+    const devise = c.devise ?? 'EUR'
+    if (t.montantFixe !== null && (t.devise ?? 'EUR') !== devise) { plan.gardees.push({ ...c, raison: 'autre devise que le taux' }); continue }
+    const apres = commissionDuTaux(t, c.base, devise)
     if (apres === null) { plan.gardees.push({ ...c, raison: 'montant de la vente inconnu' }); continue }
     if (apres === c.attendue) { plan.gardees.push({ ...c, raison: 'déjà à ce montant' }); continue }
     plan.touchees.push({ ...c, apres })
@@ -1773,8 +1858,10 @@ export function phraseRetroactif(plan: PlanRetroactif, depuis: string): string {
     return `Rétroactif : aucune commission attendue depuis le ${libelleJour(depuis)} ne change`
       + (plan.gardees.length ? ` (${plan.gardees.length} gardée${plan.gardees.length > 1 ? 's' : ''} : ${[...new Set(plan.gardees.map(g => g.raison))].join(', ')}).` : '.')
   }
-  const lignes = plan.touchees.slice(0, MAX_LIGNES_RETRO).map(c =>
-    `- ${c.qui}, dépôt${c.base !== null ? ` de ${euros(c.base)}` : ''} du ${libelleJour(c.le)} : ${euros(c.attendue)} -> ${euros(c.apres)}`)
+  const lignes = plan.touchees.slice(0, MAX_LIGNES_RETRO).map(c => {
+    const d = c.devise ?? 'EUR'
+    return `- ${c.qui}, dépôt${c.base !== null ? ` de ${montant(c.base, d)}` : ''} du ${libelleJour(c.le)} : ${montant(c.attendue, d)} -> ${montant(c.apres, d)}`
+  })
   const reste = plan.touchees.length > MAX_LIGNES_RETRO ? [`- et ${plan.touchees.length - MAX_LIGNES_RETRO} autre(s)`] : []
   const gardees = plan.gardees.length
     ? [`Gardées telles quelles : ${plan.gardees.length} (${[...new Set(plan.gardees.map(g => g.raison))].join(', ')}).`] : []
@@ -1782,8 +1869,15 @@ export function phraseRetroactif(plan: PlanRetroactif, depuis: string): string {
 }
 
 /** (29/10) Le refus d'un depot deja inscrit (garde sans limite de temps, Victor Weber). */
-export function texteDepotDejaInscrit(o: { qui: string; partenaire: string; base: number; le: string; attendue: number; statut: string; poseLe: string | null }): string {
-  return `Ce dépôt est déjà inscrit : ${euros(o.base)} chez ${o.partenaire} pour ${o.qui}, le ${libelleJour(o.le)}, `
-    + `commission ${euros(o.attendue)} (${o.statut === 'attendue' ? 'attendue' : o.statut === 'recue' ? 'reçue' : 'perdue'})`
-    + `${o.poseLe ? `, inscrit le ${libelleJour(o.poseLe.slice(0, 10))}` : ''}. Rien n'a été refait : un dépôt ne s'inscrit qu'une fois.`
+// (20/11, relecture) La devise ne compte pas dans la garde : la meme capture
+// renvoyee sans devise (defaut EUR) doit etre reconnue. deviseDemandee = celle
+// de la nouvelle demande ; si elle differe, le refus dit la devise inscrite.
+export function texteDepotDejaInscrit(o: { qui: string; partenaire: string; base: number; le: string; attendue: number; devise?: Devise; deviseDemandee?: Devise; statut: string; poseLe: string | null }): string {
+  const d = o.devise ?? 'EUR'
+  const autre = o.deviseDemandee !== undefined && o.deviseDemandee !== d
+  const enAutre = autre ? ` en ${nomDevise(d)}, pas en ${nomDevise(o.deviseDemandee as Devise)}` : ''
+  const fin = autre ? ` Même broker, même jour, même montant, même personne : c'est le même dépôt. Si la devise inscrite est fausse, corrige cette ligne, n'en inscris pas une seconde.` : ''
+  return `Ce dépôt est déjà inscrit${enAutre} : ${montant(o.base, d)} chez ${o.partenaire} pour ${o.qui}, le ${libelleJour(o.le)}, `
+    + `commission ${montant(o.attendue, d)} (${o.statut === 'attendue' ? 'attendue' : o.statut === 'recue' ? 'reçue' : 'perdue'})`
+    + `${o.poseLe ? `, inscrit le ${libelleJour(o.poseLe.slice(0, 10))}` : ''}. Rien n'a été refait : un dépôt ne s'inscrit qu'une fois.${fin}`
 }

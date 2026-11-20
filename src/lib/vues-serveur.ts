@@ -47,7 +47,7 @@ export const SQL_PAUSES_DEPOT = `select distinct on (a.acces_id)
     g.abonnement_id, coalesce(p.nom, a.source) as broker,
     to_char(a.debut, 'YYYY-MM-DD') as debut, to_char(a.jusquau, 'YYYY-MM-DD') as acces_jusquau,
     g.details->>'paye_jusquau' as paye_jusquau, g.details->>'reprise_le' as reprise_le,
-    c.montant_base as depot, c.commission_attendue as commission, c.statut as commission_statut,
+    c.montant_base as depot, c.commission_attendue as commission, c.devise as devise, c.statut as commission_statut,
     to_char(c.lots_faits_le, 'YYYY-MM-DD') as lots_faits_le,
     (a.retire_le is null and a.sorti_le is null and a.jusquau >= current_date) as en_cours,
     g.fait_le as pose_le
