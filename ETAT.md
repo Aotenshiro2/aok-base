@@ -1,5 +1,19 @@
 # ETAT du journal d etudes
 
+## ACCUEIL DES ACHETEURS : SEUILS DE « DECROCHE » (20/11/2026, commite NON pousse, branche accueil-seuils ; aucune migration)
+
+- Decision de Brice du 14/11 (option A) : seuils de travail, a revoir apres le premier mois avec les vrais chiffres.
+  Messages : D:\6_Societe\Pilotage\Data-Performance\marketing\accueil-2026\ (01, 03, 04).
+- Table unique SEUILS_ACCUEIL (src/lib/accueil/seuils-pur.ts) : forfaits Live Club J25 >= 4 jours ouverts, partie 2
+  J30 (et J7) >= 5 lecons lues, Trader autonome J14 >= 3 et J30 >= 4 jours ouverts. etatAccueil rend trop_tot (avant
+  le J+n, jour de Paris), avance ou decroche. Fenetre = du jour de l'achat inclus au J+n exclu.
+- Point d'accroche : lireEtatAccueil({ userId, offre, jalon, achatLe? }) (src/lib/accueil/mesure.ts), lecture seule,
+  sur l'existant : jours ouverts = jours distincts d'academie_lectures ; lecons lues = progression « vu » du perimetre
+  de l'offre (academie_offre_contenus), sans les reprises de Skool ; date d'achat = premier academie_acces non retire.
+  Forfaits : pas d'acces a l'academie, la date de debut vient de l'appelant. Illisible (panne, achat introuvable) =
+  le message ne part pas. Aucun envoi branche.
+- Verif : node scripts/verifier-accueil-seuils.mjs (8 blocs), tsc, eslint, next build ; EXPLAIN des 3 requetes ok.
+
 ## REGISTRE DU GROUPE : LES PSEUDOS SUIVENT, L'AGENT NE CONCLUT PLUS « JAMAIS VU » (17/11/2026, commite NON pousse, branche correctif-pseudos-1711 ; aucune migration)
 
 - Cas reel du 17/11 : Melanie demande une exemption pour un @pseudo ; l'agent repond « jamais vu dans le groupe ».
