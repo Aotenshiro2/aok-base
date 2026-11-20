@@ -179,7 +179,7 @@ bloc('bouton du membre et carte de l equipe (Oui / Non, une ligne de plus au plu
   assert.match(carte, /^Lots à vérifier chez RaiseFx : Jean Test \(jean@exemple\.fr\) dit avoir tradé ses premiers lots\./)
   assert.match(carte, /Dépôt de 650 € du 31 octobre 2026, commission attendue 587 €\. Son accès au groupe est en pause/)
   assert.match(carte, /Oui : je note ses lots faits le 20 novembre 2026 et je le préviens\. Non : je lui dis que tu ne les vois pas encore\./)
-  assert.equal(L.texteLotsDejaDecides('lots_confirmes', 'Mélanie'), 'Déjà traité par Mélanie : lots notés tradés.')
+  assert.equal(L.texteLotsDejaDecides('lots_confirmes', 'Mélanie'), 'Déjà traité par Mélanie : lots notés faits.')
   assert.equal(L.texteLotsDejaDecides('lots_pas_vus', null), 'Déjà traité : lots pas encore vus.')
   assert.equal(L.texteLotsDejaDecides(null, null), 'Cette carte est introuvable.')
   assert.ok(L.MARQUEUR_CARTE_LOTS.startsWith('[système]'), "le marqueur n'est pas une question de l'equipe (demandes en suspens)")

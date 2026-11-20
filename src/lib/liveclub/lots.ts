@@ -52,7 +52,7 @@ import {
   BOUTON_LOTS, MARQUEUR_ALERTE_DEPOT, MARQUEUR_CARTE_LOTS, PHRASE_CARTE_PERTE_FERME,
   TEXTE_DEPOT_REGULARISE_RETOUR, TEXTE_DEPOT_REGULARISE_SANS_LIEN,
   TEXTE_LOTS_CONFIRMES, TEXTE_LOTS_CONFIRMES_RETOUR, TEXTE_LOTS_CONFIRMES_SANS_LIEN,
-  clavierCarteLots, decisionDeclarationLots, etatLots, ligneDecisionLots, lotsEnRetard, phraseApresRegularisation, texteAlerteDepotPerdu,
+  clavierCarteLots, decisionDeclarationLots, etatLots, ligneClicTardifLots, ligneDecisionLots, lotsEnRetard, phraseApresRegularisation, texteAlerteDepotPerdu,
   texteCarteLots, texteDeclarationLots, texteLotsDejaDecides, texteLotsPasVus,
   type EtatLots, type IssueDeclarationLots, type IssueFermetureDepot, type VerbeLots,
 } from './lots-pur'
@@ -207,21 +207,22 @@ async function envoyerCarteLots(
       const partie = await envoyerCarteEquipe(chat, texte, clavierCarteLots(id))
       if (!partie) continue
       livres++
-      if (partie.message > 0) cartes.push(partie)
+      // (21/11) Chaque carte partie est notee TOUT DE SUITE dans la declaration
+      // (pas apres la boucle) : un clic du premier servi pendant l'envoi aux
+      // suivants ferme quand meme les cartes deja parties. Un echec ici ne
+      // retire rien : la carte non notee se rattrape au clic tardif.
+      if (partie.message !== null) {
+        cartes.push({ chat: partie.chat, message: partie.message })
+        await prisma.$executeRaw`
+          update public.cockpit_liveclub_gestes
+          set details = coalesce(details, '{}'::jsonb) || jsonb_build_object('cartes', ${JSON.stringify(cartes)}::jsonb)
+          where geste_id = ${id}`
+          .catch(err => console.warn(`[liveclub/lots] carte non notee : ${messageErreur(err).slice(0, 160)}`))
+      }
       await ajouterAHistoriqueAgent(chat, chat, [
         { role: 'user', content: MARQUEUR_CARTE_LOTS, id: `lots-${id}` },
         { role: 'assistant', content: texte, id: `lots-${id}-texte` },
       ]).catch(() => false)
-    }
-    // (21/11) Les cartes parties, dans la declaration : apres la decision de
-    // l'un, celles des autres se ferment (fermerCartesEquipe). Un echec ici ne
-    // retire rien : la carte non notee se rattrape au clic tardif.
-    if (cartes.length > 0) {
-      await prisma.$executeRaw`
-        update public.cockpit_liveclub_gestes
-        set details = coalesce(details, '{}'::jsonb) || jsonb_build_object('cartes', ${JSON.stringify(cartes)}::jsonb)
-        where geste_id = ${id}`
-        .catch(err => console.warn(`[liveclub/lots] cartes non notees : ${messageErreur(err).slice(0, 160)}`))
     }
     return livres
   } catch (err) {
@@ -309,7 +310,9 @@ export async function traiterBoutonLots(
     await acquitter(texteLotsDejaDecides(d.regle, d.par, d.le))
     // (21/11) Clic tardif (carte restee ouverte : fermeture ratee, ou carte
     // d'avant le 21/11) : cette carte se ferme avec la ligne de la decision.
-    const fin = d.genre === 'deja' ? ligneDecisionLots(d.regle, d.par, d.le) : null
+    // Une decision de moins de 60 s peut encore etre annulee (apresOui en
+    // cours puis annulerDecision) : boutons retires seulement (ligneClicTardifLots).
+    const fin = d.genre === 'deja' ? ligneClicTardifLots(d.regle, d.par, d.le, new Date()) : null
     const carte = typeof cq.message?.text === 'string' && cq.message.text.trim() ? cq.message.text : null
     if (fin && carte && Number.isSafeInteger(messageId) && messageId > 0) {
       const b = await fermerCartesEquipe([{ chat: chatIdEquipe, message: messageId }], { carte, fin, journal: '[liveclub/lots] clic tardif' })

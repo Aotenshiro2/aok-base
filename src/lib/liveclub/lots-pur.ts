@@ -382,7 +382,7 @@ export function texteCarteLots(o: {
 
 /** Une carte deja tranchee (un autre clic, ou l'autre membre de l'equipe). */
 export function texteLotsDejaDecides(regle: string | null, par: string | null, le?: Date | string | null): string {
-  const quoi = regle === 'lots_confirmes' ? 'lots notés tradés' : regle === 'lots_pas_vus' ? 'lots pas encore vus' : null
+  const quoi = regle === 'lots_confirmes' ? 'lots notés faits' : regle === 'lots_pas_vus' ? 'lots pas encore vus' : null
   const quand = momentParis(le)
   return quoi ? `Déjà traité${par ? ` par ${par}` : ''}${quand ? `, ${quand}` : ''} : ${quoi}.` : 'Cette carte est introuvable.'
 }
@@ -396,6 +396,23 @@ export function ligneDecisionLots(regle: string | null, par: string | null, le: 
   if (regle === 'lots_confirmes') return ligneDecisionEquipe({ verbe: 'oui', par, le, quoi: 'lots notés faits' })
   if (regle === 'lots_pas_vus') return ligneDecisionEquipe({ verbe: 'non', par, le })
   return null
+}
+
+/** (21/11) En deca, une decision peut encore etre annulee (apresOui en cours, puis annulerDecision). */
+export const DELAI_DECISION_SURE_MS = 60_000
+
+/**
+ * (21/11) La ligne de fin d'une carte cliquee TROP TARD : seulement si la
+ * decision date de plus de DELAI_DECISION_SURE_MS. Avant (ou date illisible),
+ * null : l'appelant retire seulement les boutons, pour ne jamais afficher une
+ * validation qui pourrait etre annulee juste apres.
+ */
+export function ligneClicTardifLots(
+  regle: string | null, par: string | null, le: Date | string | null | undefined, maintenant: Date,
+): string | null {
+  const t = le instanceof Date ? le.getTime() : typeof le === 'string' ? Date.parse(le) : NaN
+  if (!Number.isFinite(t) || maintenant.getTime() - t <= DELAI_DECISION_SURE_MS) return null
+  return ligneDecisionLots(regle, par, le)
 }
 
 /** Le marqueur de l'historique d'Agent AOK : la carte n'est pas une question de l'equipe. */

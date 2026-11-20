@@ -16,12 +16,11 @@ import { classerRefusEdition, messageIdEnvoye, texteCarteFermee, type CarteEquip
 /** La carte a un compte de l'equipe. null = rien n'est parti. */
 export async function envoyerCarteEquipe(
   chat: number, texte: string, clavier: { text: string; callback_data: string }[][],
-): Promise<CarteEquipe | null> {
+): Promise<{ chat: number; message: number | null } | null> {
   const r = await tgCockpitAppel('sendMessage', { chat_id: chat, text: texte, reply_markup: { inline_keyboard: clavier } })
   if (!r.ok) return null
-  const message = messageIdEnvoye(r.resultat)
-  // Parti mais sans message_id lisible : la carte compte comme livree, elle ne pourra pas etre fermee d'ici.
-  return { chat, message: message ?? 0 }
+  // Parti mais sans message_id lisible (message: null) : la carte compte comme livree, elle ne pourra pas etre fermee d'ici.
+  return { chat, message: messageIdEnvoye(r.resultat) }
 }
 
 export type BilanFermeture = { fermees: number; perdues: number; autres: number }

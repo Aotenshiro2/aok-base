@@ -53,12 +53,24 @@ bloc('ligne de decision des lots', () => {
 })
 
 bloc('clic tardif : qui a deja decide et quand', () => {
-  assert.equal(L.texteLotsDejaDecides('lots_confirmes', 'Mel', LE), 'Déjà traité par Mel, le 20/11 à 14 h 02 : lots notés tradés.')
+  assert.equal(L.texteLotsDejaDecides('lots_confirmes', 'Mel', LE), 'Déjà traité par Mel, le 20/11 à 14 h 02 : lots notés faits.')
   assert.equal(L.texteLotsDejaDecides('lots_pas_vus', null, LE), 'Déjà traité, le 20/11 à 14 h 02 : lots pas encore vus.')
   // L'ancienne forme (sans date) reste la meme.
-  assert.equal(L.texteLotsDejaDecides('lots_confirmes', 'Mélanie'), 'Déjà traité par Mélanie : lots notés tradés.')
+  assert.equal(L.texteLotsDejaDecides('lots_confirmes', 'Mélanie'), 'Déjà traité par Mélanie : lots notés faits.')
   assert.equal(L.texteLotsDejaDecides(null, null, LE), 'Cette carte est introuvable.')
   assert.ok(L.texteLotsDejaDecides('lots_confirmes', 'Mel', LE).length <= 200, 'tient dans une notification (200 caracteres)')
+})
+
+bloc('clic tardif : ligne de fin seulement pour une decision de plus de 60 s', () => {
+  assert.equal(L.DELAI_DECISION_SURE_MS, 60_000)
+  const apres = (s) => new Date(LE.getTime() + s * 1000)
+  // Decision encore en cours (apresOui peut l'annuler) : pas de ligne, boutons seuls retires.
+  assert.equal(L.ligneClicTardifLots('lots_confirmes', 'Mel', LE, apres(5)), null)
+  assert.equal(L.ligneClicTardifLots('lots_confirmes', 'Mel', LE, apres(60)), null)
+  assert.equal(L.ligneClicTardifLots('lots_confirmes', 'Mel', LE, apres(61)), 'Validé par Mel, le 20/11 à 14 h 02 : lots notés faits.')
+  assert.equal(L.ligneClicTardifLots('lots_pas_vus', 'Mel', LE, apres(3600)), 'Mel a répondu non, le 20/11 à 14 h 02.')
+  assert.equal(L.ligneClicTardifLots('lots_confirmes', 'Mel', null, apres(3600)), null, 'date illisible')
+  assert.equal(L.ligneClicTardifLots(null, 'Mel', LE, apres(3600)), null)
 })
 
 bloc('cartes a fermer : toutes sauf la cliquee, illisibles et doublons ecartes', () => {
@@ -103,6 +115,15 @@ bloc('cablage de la carte des lots', () => {
   // A l'envoi : chaque carte partie (message_id) est gardee dans details.cartes de la declaration.
   assert.match(lots, /envoyerCarteEquipe\(chat, texte, clavierCarteLots\(id\)\)/)
   assert.match(lots, /jsonb_build_object\('cartes', \$\{JSON\.stringify\(cartes\)\}::jsonb\)/)
+  // Chaque carte est notee juste apres SON envoi (dans la boucle), jamais avec un message_id inconnu.
+  const boucle = lots.slice(lots.indexOf('for (const dest of equipe)'), lots.indexOf('return livres'))
+  assert.match(boucle, /if \(partie\.message !== null\) \{[\s\S]{0,120}cartes\.push[\s\S]{0,300}jsonb_build_object\('cartes'/)
+  assert.match(util, /return \{ chat, message: messageIdEnvoye\(r\.resultat\) \}/)
+  assert.ok(!/message \?\? 0/.test(util))
+  // La fiche personne ne montre jamais details.cartes (identifiants Telegram de l'equipe).
+  assert.match(lire('src/lib/fiche-personne.ts'), /left\(\(x\.details - 'cartes'\)::text, 160\)/)
+  // Le clic tardif passe par la regle des 60 s.
+  assert.match(lots, /ligneClicTardifLots\(d\.regle, d\.par, d\.le, new Date\(\)\)/)
   // La decision relit ces cartes, verrou inchange (for update).
   assert.match(lots, /cartes: lireCartesEquipe\(details\.cartes\)/)
   assert.match(lots, /regle = 'lots_declares' and resultat = 'fait'\n\s+for update/)
@@ -116,7 +137,6 @@ bloc('cablage de la carte des lots', () => {
   assert.ok(!/annulerDecision/.test(fermer))
   // Clic tardif : la carte cliquee se ferme avec la ligne de la decision.
   assert.match(lots, /texteLotsDejaDecides\(d\.regle, d\.par, d\.le\)/)
-  assert.match(lots, /ligneDecisionLots\(d\.regle, d\.par, d\.le\)/)
   // L'utilitaire ne jette pas et ne logue ni identifiant ni texte.
   assert.ok(!/console\.\w+\([^)]*c\.chat/.test(util))
   assert.ok(!/console\.\w+\([^)]*o\.carte/.test(util))

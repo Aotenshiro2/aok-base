@@ -365,7 +365,7 @@ async function lireFiche(tx: Tx, g: Groupe): Promise<DonneesFiche> {
       'gestes', ${liste(
         `(select * from public.cockpit_liveclub_gestes where telegram_id = any($1::bigint[]) or membre_id = any($2::uuid[]) order by fait_le desc limit 12) x`,
         `'le', ${H('x.fait_le')}, 'geste', x.geste, 'resultat', x.resultat, 'regle', x.regle,
-         'par', split_part(x.acteur, ':', 1), 'details', left(x.details::text, 160)`,
+         'par', split_part(x.acteur, ':', 1), 'details', left((x.details - 'cartes')::text, 160)`,
         'x.fait_le desc')},
       'vies', ${liste(
         `(select * from public.cockpit_arch_vies where personne_id = any($3::text[]) order by dit_le desc nulls last limit 12) v`,
