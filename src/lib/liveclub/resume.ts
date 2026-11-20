@@ -49,6 +49,7 @@
 
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
+import { estMelanie } from '@/lib/agent-cockpit-pur'
 import { sourcesAContacter } from './contact-instantane'
 import { stripeGet } from '@/lib/stripe-actions'
 import { ajouterAHistoriqueAgent, tgCockpit } from '@/lib/agent-cockpit-telegram'
@@ -71,7 +72,7 @@ function idsListe(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
 }
 import {
-  attentesHorsEquipe, changementsAbonnements, changementsHorsDuBot, cleAnnonce, cleGeste, composerResume, decouperResume,
+  attentesHorsEquipe, changementsAbonnements, changementsHorsDuBot, cleAnnonce, cleGeste, composerResume, composerResumeCourt, decouperResume,
   detailAccesBroker, detailAContacter, detailAttenteHumain, detailAvecRelais, detailDemande, detailExemption, detailSuspens,
   detailArrivee, detailMontantArrivee, detailRepriseBot, factureDeStripe, remiseDeStripe, detailTarifReserve, entreesHistoriqueResume, episodesAAnnoncer, estDeLEquipe, horsEquipe, RUBRIQUES_DE_L_EQUIPE,
   estNouvelAbonnement, evenementDeChangement, evenementDeGeste, instantaneAbonnements, memoireAnnonces, pseudoCroise, relaisParEpisode,
@@ -756,10 +757,11 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
       if (estDeLEquipe({ membreId: m.membreId }, equipeOnto)) continue
       const r = fiche.get(m.membreId)
       const { pseudo, alerte } = pseudoCroise(r?.telegram, pseudoRattache.get(m.membreId))
-      const base = detailAvecRelais(detailAContacter(m, jour), relaisDe.get(cleAnnonce(m.membreId, m.cleEpisode)) ?? [])
+      const relais = relaisDe.get(cleAnnonce(m.membreId, m.cleEpisode)) ?? []
+      const base = detailAvecRelais(detailAContacter(m, jour), relais)
       const detail = alerte ? `${base} ; ${alerte}` : base
       // Un meme instant pour tous : le tri (stable) de composerResume garde l'ordre des fenetres.
-      ajouter({ rubrique: 'contacter', qui: `m${m.membreId}`, quand: jusqua.toISOString(), detail },
+      ajouter({ rubrique: 'contacter', qui: `m${m.membreId}`, quand: jusqua.toISOString(), detail, relais },
         { nom: r?.nom ?? null, email: r?.email ?? null, pseudo })
     }
     const annonces = risqueLu
@@ -798,22 +800,30 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
     // 5. La ligne du jour, AVANT l'envoi : un rejeu ne renverra rien.
     if (!await reserverJour({ jour, depuis, jusqua, statut: 'en_cours', etat: instantane, annonces })) return bilan('deja_fait')
 
-    const destinataires = await prisma.$queryRaw<{ telegram_id: bigint }[]>`
-      select telegram_id from public.cockpit_telegram_comptes where diffusion = 'equipe' order by cree_le`
+    const destinataires = await prisma.$queryRaw<{ telegram_id: bigint; libelle: string | null }[]>`
+      select telegram_id, libelle from public.cockpit_telegram_comptes where diffusion = 'equipe' order by cree_le`
     const messages = decouperResume(texte)
+    // (20/11) Melanie recoit la version courte (ce qui demande une action
+    // d'elle) ; rien a faire pour elle = pas de message. Brice : inchange.
+    const court = composerResumeCourt(sansEquipe, annuaire.personnes, { depuis: depuis.toISOString(), jusqua: jusqua.toISOString() })
     let livres = 0
     for (const d of destinataires) {
       const chat = Number(d.telegram_id)
       if (!Number.isSafeInteger(chat) || chat <= 0) continue
+      const pourMelanie = estMelanie(d.libelle)
+      if (pourMelanie && !court) continue
+      const aEnvoyer = pourMelanie && court ? decouperResume(court.texte) : messages
       let tout = true
-      for (const m of messages) {
+      for (const m of aEnvoyer) {
         const ok = await tgCockpit('sendMessage', { chat_id: chat, text: m, link_preview_options: { is_disabled: true } })
         if (!ok) { tout = false; break }
       }
       if (!tout) continue
       livres++
       try {
-        await ajouterAHistoriqueAgent(chat, chat, entreesHistoriqueResume(texte, jour))
+        await ajouterAHistoriqueAgent(chat, chat, pourMelanie && court
+          ? entreesHistoriqueResume(court.texte, jour, court.reste)
+          : entreesHistoriqueResume(texte, jour))
       } catch (err) {
         console.warn(`[liveclub/resume] historique de l'agent non complete : ${messageErreur(err).slice(0, 160)}`)
       }

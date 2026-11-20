@@ -63,6 +63,8 @@ export type EvenementResume = {
    * figure dans le resume, mais ne suffit pas a l'envoyer.
    */
   ancien?: boolean
+  /** (20/11) « À contacter » : les relais d'accueil qui s'en occupent (version courte : regroupes en une ligne). */
+  relais?: readonly string[]
 }
 
 export const TITRE_RESUME = 'Live Club, ce qui a bougé depuis hier'
@@ -850,6 +852,81 @@ export function composerResume(
   return blocs.join('\n\n')
 }
 
+// ---------------------------------------------------------------------------
+// (20/11) La version courte, pour Melanie (frictions du 20/11 : le resume du
+// 18/11 faisait 22 lignes, qu'elle devait trier seule)
+// ---------------------------------------------------------------------------
+//
+// Seulement ce qui demande une action de sa part ; les lignes « (Alex s'en
+// occupe) » regroupees en une seule ; « À contacter » plafonne a 5 lignes, le
+// reste garde dans l'historique de l'agent (« la suite ») ; pas de « Bientôt ».
+// Brice garde la version complete (composerResume).
+
+/** Les rubriques qui demandent un geste de l'equipe (les autres sont de l'information). */
+export const RUBRIQUES_ACTION: ReadonlySet<RubriqueResume> = new Set<RubriqueResume>(['impayes', 'rebonds', 'comptes', 'contacter', 'humains', 'suspens'])
+/** Au plus tant de lignes « À contacter » dans la version courte. */
+export const MAX_A_CONTACTER_COURT = 5
+/** Le debut de la ligne de l'historique qui garde le reste (entreesHistoriqueResume). */
+export const DEBUT_RESTE_A_CONTACTER = 'Les autres membres à contacter, non montrés dans ce résumé court'
+
+/** « 3 relances en cours chez Alex » ; deux relais : « 2 relances en cours chez Alex, 1 chez Sam ». */
+export function ligneRelances(parRelais: ReadonlyMap<string, number>): string | null {
+  const l = [...parRelais].filter(([, n]) => n > 0)
+  if (l.length === 0) return null
+  const [nom0, n0] = l[0]
+  const premiere = `${n0} relance${n0 > 1 ? 's' : ''} en cours chez ${nom0}`
+  return [premiere, ...l.slice(1).map(([nom, n]) => `${n} chez ${nom}`)].join(', ')
+}
+
+/**
+ * La version courte, ou null s'il n'y a rien a faire pour elle (aucun envoi).
+ * `reste` : les lignes « À contacter » au-dela de MAX_A_CONTACTER_COURT.
+ */
+export function composerResumeCourt(
+  evenements: readonly EvenementResume[],
+  personnes: ReadonlyMap<string, Personne>,
+  o: { depuis: string; jusqua: string },
+): { texte: string; reste: string[] } | null {
+  const action = evenements.filter(e => RUBRIQUES_ACTION.has(e.rubrique))
+  if (!ilYAMouvement(action)) return null
+  const tries = [...action].sort((a, b) => Date.parse(a.quand) - Date.parse(b.quand))
+  const blocs: string[] = [titreResume(o.depuis, o.jusqua)]
+  let reste: string[] = []
+  let aFaire = 0
+  for (const { cle, titre } of RUBRIQUES_RESUME) {
+    if (!RUBRIQUES_ACTION.has(cle)) continue
+    const parQui = new Map<string, string[]>()
+    const parRelais = new Map<string, number>()
+    const relayes = new Set<string>()
+    for (const e of tries) {
+      if (e.rubrique !== cle) continue
+      const nom = cle === 'contacter' ? e.relais?.map(n => n.trim()).find(Boolean) : undefined
+      if (nom) {
+        if (!relayes.has(e.qui)) parRelais.set(nom, (parRelais.get(nom) ?? 0) + 1)
+        relayes.add(e.qui)
+        continue
+      }
+      const details = parQui.get(e.qui) ?? []
+      if (!details.includes(e.detail)) details.push(e.detail)
+      parQui.set(e.qui, details)
+    }
+    for (const qui of relayes) parQui.delete(qui)
+    let lignes = [...parQui].map(([qui, details]) => `- ${identite(personnes.get(qui), qui)} : ${details.join(' ; ')}`)
+    if (cle === 'contacter' && lignes.length > MAX_A_CONTACTER_COURT) {
+      reste = lignes.slice(MAX_A_CONTACTER_COURT)
+      lignes = [...lignes.slice(0, MAX_A_CONTACTER_COURT), `- et ${reste.length} autre${reste.length > 1 ? 's' : ''} : dis « la suite »`]
+    }
+    aFaire += lignes.length
+    const relances = cle === 'contacter' ? ligneRelances(parRelais) : null
+    if (relances) lignes.push(`- ${relances}`)
+    if (lignes.length === 0) continue
+    blocs.push([titre, ...lignes].join('\n'))
+  }
+  // Les relances d'Alex seules ne demandent rien a Melanie : pas de message.
+  if (aFaire === 0) return null
+  return { texte: blocs.join('\n\n'), reste }
+}
+
 /** Coupe une ligne trop longue en morceaux de `max` caracteres au plus. */
 function couper(ligne: string, max: number): string[] {
   const morceaux: string[] = []
@@ -910,10 +987,16 @@ export function decouperResume(texte: string, max = MAX_MESSAGE_TELEGRAM): strin
  */
 export const MARQUEUR_RESUME_HISTORIQUE = "[système] Résumé du matin du Live Club, envoyé automatiquement par Agent AOK (ce n'est pas une question de l'équipe)."
 
-/** Les deux lignes a ajouter a l'historique, avec un identifiant par jour (jamais ajoutees deux fois). */
-export function entreesHistoriqueResume(texte: string, jour: string): { role: 'user' | 'assistant'; content: string; id: string }[] {
+/**
+ * Les deux lignes a ajouter a l'historique, avec un identifiant par jour (jamais ajoutees deux fois).
+ * (20/11) `reste` : les lignes « À contacter » non montrees dans la version courte ; elles suivent le
+ * marqueur, pour que l'agent les donne quand on lui dit « la suite ».
+ */
+export function entreesHistoriqueResume(texte: string, jour: string, reste: readonly string[] = []): { role: 'user' | 'assistant'; content: string; id: string }[] {
+  const marqueur = reste.length === 0 ? MARQUEUR_RESUME_HISTORIQUE
+    : `${MARQUEUR_RESUME_HISTORIQUE} ${DEBUT_RESTE_A_CONTACTER} (${reste.length}), à donner si on te dit « la suite » :\n${reste.join('\n')}`
   return [
-    { role: 'user', content: MARQUEUR_RESUME_HISTORIQUE, id: `resume-${jour}` },
+    { role: 'user', content: marqueur, id: `resume-${jour}` },
     { role: 'assistant', content: texte, id: `resume-${jour}-texte` },
   ]
 }
