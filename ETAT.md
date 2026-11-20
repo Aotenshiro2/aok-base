@@ -31,6 +31,24 @@
   Forfaits : pas d'acces a l'academie, la date de debut vient de l'appelant. Illisible (panne, achat introuvable) =
   le message ne part pas. Aucun envoi branche.
 - Verif : node scripts/verifier-accueil-seuils.mjs (8 blocs), tsc, eslint, next build ; EXPLAIN des 3 requetes ok.
+## PARTIE 2 DE SMART MONEY TECHNIQUE A 250 EUR POUR LES MEMBRES DU LIVE CLUB, AU BLACK FRIDAY (20/11/2026, go de Brice carte prix-2026-11-partie2-membres-bf, commite NON pousse, branche partie2-membres-bf ; migration 20261120130000 ECRITE (renommee au rebase du 20/11, 20261120120000 etant pris par la devise des depots) dans le workspace, PAS appliquee ; RIEN cree en base ni chez Stripe)
+
+- Le seul calcul du prix membre : prixMembre (src/lib/academie/prix-membre-pur.ts), avec la base : prixDuCompte
+  (prix-membre.ts). Carte (/api/academie/achat), PayPal (commande ET capture) et /moi passent par lui. A venir (decision
+  de Brice du 20/11, NON construite) : le prix membre baissera de ce que le membre a deja paye au Live Club, sans
+  plancher ; ca se branche dans prixMembre.
+- Membre = la regle du site : le Live Club lui ouvre une partie du module (raison liveclub) ET droits.liveClub = 'oui'
+  (membreDuModule). 'inconnu' = non membre (prix courant) ; un achat de la partie 1 seule ne fait pas un membre.
+- Tarif = une offre en base « <offre vendue>-membres-<nom> » (module-la-formation-complete-partie-2-membres-bf) : type
+  module, stripe_aok, prix, stripe_price_id, vente_debut/vente_fin (colonnes de la migration), AUCUN contenu (jamais au
+  catalogue). SQL_TARIFS_MEMBRES. Colonnes absentes : erreur 42703, tout retombe sur le prix courant.
+- Carte : membre connecte dans la fenetre -> stripe_price_id du tarif, metadata academie_tarif, expires_at a la fin de la
+  fenetre (31 min au moins). L'acces reste pose sur l'offre de la partie 2 (webhook inchange, note « Tarif membre ... »).
+- PayPal : reference_id module-smt-partie-2-membre (OFFRES_PAYPAL['smt-partie-2'].referenceMembre) ; la capture
+  reverifie le compte titulaire (membre, maintenant) et la fenetre a la CREATION de la commande, sinon 409 'montant'
+  (Live Club illisible : 503). Base ou droits illisibles a la creation : prix courant.
+- /moi : offres[].tarif { prix_eur, prix_courant_eur, fin_le } pour CE compte seulement ; /catalogue inchange ; bot inchange.
+- Verifs : node scripts/verifier-partie2-membres-bf.mjs (11 blocs : membre ou non, avant/pendant/apres, carte et PayPal).
 
 ## REGISTRE DU GROUPE : LES PSEUDOS SUIVENT, L'AGENT NE CONCLUT PLUS « JAMAIS VU » (17/11/2026, commite NON pousse, branche correctif-pseudos-1711 ; aucune migration)
 

@@ -160,7 +160,7 @@ export async function prixClub(): Promise<number | null> {
 
 export async function creerCommande(
   c: { clientId: string; secret: string },
-  p: { titulaire: Titulaire; montantEur: number; essai: boolean; offre?: OffrePayPal },
+  p: { titulaire: Titulaire; montantEur: number; essai: boolean; offre?: OffrePayPal; membre?: boolean },
 ): Promise<string> {
   const o = await appeler(c, '/v2/checkout/orders', { corps: corpsCommande(p) })
   if (typeof o.id !== 'string') throw new ErreurPayPal(502, 'reponse')

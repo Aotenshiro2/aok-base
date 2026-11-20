@@ -511,7 +511,8 @@ select m.slug as module_slug, m.titre as module_titre, o.slug as offre_slug, o.s
  * celui de stripe_price_id, jamais une valeur venue de la page.
  */
 export const SQL_OFFRE_PARTIE_EN_VENTE = `
-select m.slug as module_slug, m.titre as module_titre, o.slug as offre_slug, o.stripe_price_id, o.titre as offre_titre
+select m.slug as module_slug, m.titre as module_titre, o.slug as offre_slug, o.stripe_price_id, o.titre as offre_titre,
+       m.id::text as module_id, o.prix_eur::float8 as prix_eur
   from public.academie_modules m
   join public.academie_offres o
     on o.slug = 'module-' || m.slug || '-partie-' || substring($2::text from '-partie-([0-9]{1,2})$')
@@ -523,6 +524,31 @@ select m.slug as module_slug, m.titre as module_titre, o.slug as offre_slug, o.s
      select 1 from public.academie_offre_contenus c
       where c.offre_id = o.id and (c.module_id <> m.id or c.section_id is null))
  limit 1
+`
+
+/**
+ * (20/11/2026) Les tarifs membres DATES (prix-membre.ts) : une offre
+ * « <offre vendue>-membres-<nom> » (ex. module-la-formation-complete-partie-2-membres-bf)
+ * de type module, canal stripe_aok, avec un prix, un stripe_price_id et une
+ * fenetre de vente (vente_debut, vente_fin : migration
+ * 20261120130000_academie_offres_fenetre_de_vente). Elle n'ouvre RIEN (aucun
+ * contenu : jamais dans le catalogue ni sur une page publique) ; l'achat
+ * ouvre l'offre vendue (cible). module_id : le module de la cible. Toutes
+ * les fenetres, passees comprises : la regle pure (prixMembre) choisit selon
+ * le moment (la creation d'une commande PayPal, relue a sa capture).
+ * Colonnes absentes (migration pas appliquee) : erreur 42703, l'appelant
+ * retombe sur le prix courant.
+ */
+export const SQL_TARIFS_MEMBRES = `
+select c.slug as cible, t.slug, t.prix_eur::float8 as prix_eur, t.stripe_price_id, t.vente_debut, t.vente_fin,
+       (select oc.module_id::text from public.academie_offre_contenus oc where oc.offre_id = c.id limit 1) as module_id
+  from public.academie_offres t
+  join public.academie_offres c on t.slug like c.slug || '-membres-%' and c.id <> t.id
+ where t.type = 'module' and t.canal = 'stripe_aok'
+   and t.prix_eur is not null and t.prix_eur > 0 and t.stripe_price_id is not null
+   and t.vente_debut is not null and t.vente_fin is not null and t.vente_fin > t.vente_debut
+   and not exists (select 1 from public.academie_offre_contenus x where x.offre_id = t.id)
+ order by t.slug
 `
 
 /** $1 = uuid du compte. Son email s'il est confirme (prerempli dans Checkout). */

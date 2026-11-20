@@ -3,6 +3,8 @@ import {
   cleAchat, clePublique, creerSession, emailConfirme, ErreurStripe, offreEnVente, offrePartieEnVente, ventePublique,
 } from '@/lib/academie/achat'
 import { offrePartie, retourSur, type OffreEnVente } from '@/lib/academie/achat-pur'
+import { prixDuCompte } from '@/lib/academie/prix-membre'
+import { expirationSession } from '@/lib/academie/prix-membre-pur'
 import { compteDuJeton, corsAcademie, entetesAcademie, refusAcademie, tronquer } from '@/lib/academie/http'
 import { messageErreur } from '@/lib/liveclub/pur'
 
@@ -22,6 +24,12 @@ import { messageErreur } from '@/lib/liveclub/pur'
  * slug exact, stripe_aok, prix et stripe_price_id, sections de ce module
  * seulement) ; le prix facture est celui de son stripe_price_id, jamais une
  * valeur de la page. Sans offre : le module entier, comme avant.
+ *
+ * Tarif membre (20/11/2026, Black Friday) : une partie achetee par un compte
+ * connecte membre du Live Club, dans la fenetre d'un tarif en base
+ * (SQL_TARIFS_MEMBRES), se paie au stripe_price_id du tarif (prixDuCompte,
+ * prix-membre.ts) ; la session expire au plus tard a la fin de la fenetre
+ * (31 min au moins, minimum de Stripe). Le webhook ouvre l'offre de la partie.
  *
  * 200 { ok, client_secret, session_id, cle_publique }
  * 400 'corps' | 403 'ferme' | 404 'module' (pas en vente) | 503 'config' (cle absente ou sans permission) | 502 'stripe'
@@ -71,7 +79,8 @@ export async function POST(req: NextRequest) {
     email = null
   }
 
-  let offre: OffreEnVente | null
+  // prixEur : le prix courant d'une partie (offrePartieEnVente), base du tarif membre ; absent pour le module entier.
+  let offre: (OffreEnVente & { prixEur?: number }) | null
   try {
     offre = partie ? await offrePartieEnVente(slug, partie) : await offreEnVente(slug)
   } catch (err) {
@@ -79,14 +88,32 @@ export async function POST(req: NextRequest) {
     return refus('indisponible', 503)
   }
   if (!offre) return refus('module', 404)
+  const prixCourant = typeof offre.prixEur === 'number' && Number.isFinite(offre.prixEur) ? offre.prixEur : null
+
+  // (20/11/2026) Le tarif membre d'une partie (prix-membre-pur.ts, le seul calcul) : un membre du Live Club, dans la
+  // fenetre du tarif en base, paie son stripe_price_id. Sinon, ou si la base ou ses droits sont illisibles : le prix
+  // courant (Checkout affiche le montant avant le paiement). La page n'envoie jamais de prix.
+  let expiresAt: number | null = null
+  if (partie && userId && prixCourant !== null && prixCourant > 0) {
+    const maintenant = new Date()
+    try {
+      const calcul = await prixDuCompte({ userId, offre: offre.offreSlug, prixCourantEur: prixCourant, quand: maintenant })
+      if (calcul.tarif) {
+        offre = { ...offre, stripePriceId: calcul.tarif.stripePriceId, tarif: calcul.tarif.slug }
+        expiresAt = expirationSession(calcul.tarif.fin, maintenant)
+      }
+    } catch (err) {
+      console.warn(`[academie/achat] tarif membre illisible, prix courant offre=${partie} : ${messageErreur(err)}`)
+    }
+  }
 
   const origin = req.headers.get('origin')
   const base = origin && ORIGINES_RETOUR.has(origin) ? origin : SITE
   const retourUrl = `${base}${retour}?achat_session={CHECKOUT_SESSION_ID}`
 
   try {
-    const s = await creerSession(cle, offre, { retourUrl, userId, email, essai })
-    console.info(`[academie/achat] session creee module=${slug}${partie ? ` offre=${partie}` : ''} compte=${userId ? tronquer(userId) : 'aucun'}${essai ? ' essai' : ''}`)
+    const s = await creerSession(cle, offre, { retourUrl, userId, email, essai, expiresAt })
+    console.info(`[academie/achat] session creee module=${slug}${partie ? ` offre=${partie}` : ''}${offre.tarif ? ` tarif=${offre.tarif}` : ''} compte=${userId ? tronquer(userId) : 'aucun'}${essai ? ' essai' : ''}`)
     return NextResponse.json({ ok: true, client_secret: s.clientSecret, session_id: s.id, cle_publique: publique }, { headers })
   } catch (err) {
     if (err instanceof ErreurStripe && (err.permission || err.statut === 401)) {

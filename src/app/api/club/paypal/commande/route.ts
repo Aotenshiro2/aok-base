@@ -4,6 +4,7 @@ import { decisionCommande, offrePayPal, prixCommande, titulaireDe } from '@/lib/
 import { roleAcademie } from '@/lib/academie/droits'
 import { compteDuJeton, corsAcademie, entetesAcademie, refusAcademie, tronquer } from '@/lib/academie/http'
 import { estAdmin } from '@/lib/academie/pur'
+import { prixDuCompte } from '@/lib/academie/prix-membre'
 import { messageErreur } from '@/lib/liveclub/pur'
 
 /**
@@ -25,6 +26,12 @@ import { messageErreur } from '@/lib/liveclub/pur'
  * ou 'smt-partie-2' (offres module-la-formation-complete-partie-1 et -2). Memes
  * regles que le module : case exigee, prix de l'offre en base seulement,
  * SMT_PARTIE_1_PAYPAL_PUBLIC et SMT_PARTIE_2_PAYPAL_PUBLIC, fermees par defaut.
+ *
+ * 20/11/2026 : tarif membre (Black Friday). { offre: 'smt-partie-2' } d'un
+ * compte connecte membre du Live Club, dans la fenetre d'un tarif en base :
+ * le prix du tarif (prixDuCompte, prix-membre.ts), reference_id
+ * module-smt-partie-2-membre. Sans compte, non membre ou hors fenetre : le
+ * prix courant, comme avant.
  *
  * Corps : { offre?, email?, renonciation: true (Club et module), essai?: true }.
  * Bearer facultatif : connecte, le compte part en custom_id (u:<uuid>, lu dans
@@ -121,11 +128,27 @@ export async function POST(req: NextRequest) {
     console.warn(`[club/paypal/commande] offre ${offre.slug} absente en base ou sans prix : rien ne se vend (migration a appliquer ?)`)
     return refus('config', 503)
   }
-  const montantEur = prix.montantEur
+  let montantEur = prix.montantEur
+
+  // (20/11/2026) Le tarif membre (prix-membre-pur.ts, le seul calcul) : un compte connecte membre du Live Club, dans
+  // la fenetre d'un tarif de l'offre en base, paie le prix du tarif ; la commande porte alors referenceMembre, que la
+  // capture reverifie. Base ou droits illisibles : le prix courant (PayPal affiche le montant avant l'accord).
+  let membre = false
+  if (!essai && offre.referenceMembre && userId) {
+    try {
+      const calcul = await prixDuCompte({ userId, offre: offre.slug, prixCourantEur: montantEur })
+      if (calcul.tarif) {
+        montantEur = calcul.prixEur
+        membre = true
+      }
+    } catch (err) {
+      console.warn(`[club/paypal/commande] tarif membre illisible, prix courant offre=${offre.cle} : ${messageErreur(err)}`)
+    }
+  }
 
   try {
-    const orderId = await creerCommande(config, { titulaire, montantEur, essai, offre })
-    console.info(`[club/paypal/commande] commande creee ${orderId} offre=${offre.cle} compte=${userId ? tronquer(userId) : 'email'} ${montantEur} EUR${essai ? ' essai' : ''}`)
+    const orderId = await creerCommande(config, { titulaire, montantEur, essai, offre, membre })
+    console.info(`[club/paypal/commande] commande creee ${orderId} offre=${offre.cle}${membre ? ' tarif membre' : ''} compte=${userId ? tronquer(userId) : 'email'} ${montantEur} EUR${essai ? ' essai' : ''}`)
     return NextResponse.json({ ok: true, order_id: orderId, offre: offre.cle }, { headers })
   } catch (err) {
     if (err instanceof ErreurPayPal && (err.statut === 401 || err.statut === 403)) {

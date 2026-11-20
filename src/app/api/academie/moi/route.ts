@@ -11,6 +11,8 @@ import {
 import { noterConnexion, progressionDuCompte, type ProgressionLecon } from '@/lib/academie/suivi'
 import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
 import { soutienDuCompte, type SoutienDuCompte } from '@/lib/soutien'
+import { lireTarifsMembres } from '@/lib/academie/prix-membre'
+import { membreDuModule, prixMembre, tarifPossible, vueTarif, type TarifMembre } from '@/lib/academie/prix-membre-pur'
 
 /**
  * GET /api/academie/moi : tout ce dont les ecrans de l'academie ont besoin,
@@ -61,7 +63,11 @@ import { soutienDuCompte, type SoutienDuCompte } from '@/lib/soutien'
  *                 offres: [{ slug, titre, type, prix_eur, portee, sections }],   ce qui l'ouvre (portee : module,
  *                                           sections = une partie, tout = l'offre ouvre tout, ETM) ;
  *                                           sections (15/11/2026) : les ids des sections ouvertes par
- *                                           une offre de portee 'sections', vide sinon
+ *                                           une offre de portee 'sections', vide sinon ;
+ *                                           tarif (20/11/2026, absent sinon) : { prix_eur, prix_courant_eur,
+ *                                           fin_le } quand CE compte, membre du Live Club, a un tarif membre
+ *                                           en cours sur l'offre (Black Friday : la partie 2 a 250 au lieu
+ *                                           de 850 jusqu'au 30/11 23:59:59 Paris). Le journal facture le sien.
  *                 acces: entier | partiel | ferme | inconnu, raisons,
  *                 progression: { lecons, vues, en_cours, ouvertes, commencees, pourcentage },
  *                           pourcentage = part des lecons ACCESSIBLES a l'eleve a l'etat 'vu'
@@ -178,10 +184,23 @@ export async function GET(req: NextRequest) {
   const { modules: modulesBruts, continuer } = construire(catalogue, droits, progression)
   const situation = await reprise
   const reperes = situation ? reperesDuCompte(situation, catalogue) : null
+  // (20/11/2026) Les tarifs membres en cours (Black Friday) : seulement pour CE compte, membre du Live Club, dans la
+  // fenetre ; jamais dans /catalogue ni pour un visiteur. Illisibles (migration absente) : aucun, /moi ne tombe pas.
+  const tarifs: TarifMembre[] = await lireTarifsMembres().catch((err: unknown) => {
+    console.warn(`[academie/moi] tarifs membres illisibles : ${messageErreur(err)}`)
+    return []
+  })
+  const maintenant = new Date()
   const modules = modulesBruts.map(m => ({
     ...m,
     skool: reperePublic(reperes?.get(`module:${m.id}`)),
     sections: m.sections.map(s => ({ ...s, skool: reperePublic(reperes?.get(`section:${s.id}`)) })),
+    offres: m.offres.map(o => {
+      if (!tarifs.length || typeof o.prix_eur !== 'number' || !tarifPossible(o.slug, tarifs, maintenant)) return o
+      const calcul = prixMembre({ offre: o.slug, prixCourantEur: o.prix_eur, membre: membreDuModule(droits, m.id), tarifs, quand: maintenant })
+      const tarif = vueTarif(calcul)
+      return tarif ? { ...o, tarif } : o
+    }),
   }))
   return NextResponse.json(
     {

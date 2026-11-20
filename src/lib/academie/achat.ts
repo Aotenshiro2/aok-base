@@ -105,14 +105,17 @@ export async function offreEnVente(slug: string): Promise<OffreEnVente | null> {
  * si elle se vend seule : sinon null (pas encore en base, pas de prix ou de
  * stripe_price_id, ou elle ouvre autre chose que des sections de ce module).
  */
-export async function offrePartieEnVente(slug: string, offre: string): Promise<OffreEnVente | null> {
+export async function offrePartieEnVente(slug: string, offre: string): Promise<(OffreEnVente & { prixEur: number }) | null> {
   const l = (await prisma.$queryRawUnsafe<{
     module_slug: string; module_titre: string; offre_slug: string; stripe_price_id: string; offre_titre: string
+    module_id: string; prix_eur: number | string
   }[]>(SQL_OFFRE_PARTIE_EN_VENTE, slug, offre))[0]
   if (!l) return null
   return {
     moduleSlug: l.module_slug, moduleTitre: l.module_titre, offreSlug: l.offre_slug, stripePriceId: l.stripe_price_id,
     partie: l.offre_titre,
+    // (20/11/2026) Le prix courant de la partie : la base du prix membre (prixDuCompte, prix-membre.ts).
+    prixEur: Number(l.prix_eur),
   }
 }
 
@@ -122,7 +125,7 @@ export async function emailConfirme(userId: string): Promise<string | null> {
 }
 
 export async function creerSession(cle: string, o: OffreEnVente, p: {
-  retourUrl: string; userId: string | null; email: string | null; essai: boolean
+  retourUrl: string; userId: string | null; email: string | null; essai: boolean; expiresAt?: number | null
 }): Promise<{ id: string; clientSecret: string }> {
   const s = await appeler(cle, '/v1/checkout/sessions', corpsSession(o, p))
   if (typeof s.id !== 'string' || typeof s.client_secret !== 'string') throw new ErreurStripe(502, 'reponse', false)
@@ -154,7 +157,12 @@ export async function enregistrerAchat(session: Record<string, unknown>): Promis
   if (!lu.ok) return lu
   const a = lu.achat
   const paiement = a.chargeId ? `stripe:${a.chargeId}` : null
-  const note = a.essai ? 'Achat test (?achat=essai), avant ouverture publique' : null
+  const notes = [
+    a.essai ? 'Achat test (?achat=essai), avant ouverture publique' : null,
+    // (20/11/2026) Paye au tarif membre (prix-membre-pur.ts) : le slug de son offre.
+    a.tarif ? `Tarif membre ${a.tarif}` : null,
+  ].filter((x): x is string => x !== null)
+  const note = notes.length ? notes.join(' | ') : null
   const l = (await prisma.$queryRawUnsafe<{ offre_connue: number; cree: number }[]>(
     SQL_POSER_ACHAT, a.userId, a.email, a.offreSlug, a.sessionId, a.montantEur, a.renonciationLe, note, paiement,
   ))[0]

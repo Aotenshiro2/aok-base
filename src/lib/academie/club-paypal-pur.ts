@@ -106,6 +106,13 @@ export type OffrePayPal = {
    * pas celui du 10% Club. Absent : le Club ou le coaching.
    */
   module?: ModulePayPal
+  /**
+   * (20/11/2026) Le reference_id d'une commande au tarif membre (prix-membre-pur.ts) :
+   * pose par la route commande seulement, relu a la capture, qui reverifie le
+   * membre et la fenetre du tarif au moment de la commande. Absent : pas de
+   * tarif membre pour cette offre.
+   */
+  referenceMembre?: string
 }
 
 export const OFFRES_PAYPAL: Record<CleOffre, OffrePayPal> = {
@@ -171,6 +178,8 @@ export const OFFRES_PAYPAL: Record<CleOffre, OffrePayPal> = {
     prefixeCapture: 'smt-p2-capture-',
     renonciation: true,
     module: { slug: 'la-formation-complete', titre: 'Smart Money Technique, partie 2' },
+    // Black Friday 2026 : la partie 2 au tarif membre du Live Club (offre ...-partie-2-membres-bf en base).
+    referenceMembre: 'module-smt-partie-2-membre',
   },
 }
 
@@ -186,10 +195,12 @@ export function offrePayPal(v: unknown): OffrePayPal | null {
 }
 
 /** L'offre et le mode essai portes par un reference_id relu chez PayPal, ou null (pas une commande de ce tunnel). */
-export function offreDeReference(v: unknown): { offre: OffrePayPal; essai: boolean } | null {
+export function offreDeReference(v: unknown): { offre: OffrePayPal; essai: boolean; membre?: true } | null {
   for (const offre of Object.values(OFFRES_PAYPAL)) {
     if (v === offre.reference) return { offre, essai: false }
     if (v === offre.referenceEssai) return { offre, essai: true }
+    // (20/11/2026) Une commande au tarif membre : la capture reverifie le membre et la fenetre.
+    if (offre.referenceMembre && v === offre.referenceMembre) return { offre, essai: false, membre: true }
   }
   return null
 }
@@ -300,12 +311,17 @@ export function centimes(v: unknown): number | null {
  * l'acheteur peut choisir la carte (formulaire invite) ou le 4x, et
  * application_context vaut pour toutes les sources (NO_SHIPPING compris).
  */
-export function corpsCommande(p: { titulaire: Titulaire; montantEur: number; essai: boolean; offre?: OffrePayPal }): Record<string, unknown> {
+export function corpsCommande(p: {
+  titulaire: Titulaire; montantEur: number; essai: boolean; offre?: OffrePayPal
+  /** (20/11/2026) Le montant est un tarif membre : reference_id = referenceMembre de l'offre (jamais en essai). */
+  membre?: boolean
+}): Record<string, unknown> {
   const offre = p.offre ?? OFFRES_PAYPAL.club
+  const reference = p.essai ? offre.referenceEssai : p.membre && offre.referenceMembre ? offre.referenceMembre : offre.reference
   return {
     intent: 'CAPTURE',
     purchase_units: [{
-      reference_id: p.essai ? offre.referenceEssai : offre.reference,
+      reference_id: reference,
       description: offre.description,
       custom_id: customIdDe(p.titulaire),
       amount: { currency_code: 'EUR', value: valeurPayPal(p.montantEur) },
@@ -348,6 +364,8 @@ export type CommandeLue = {
   /** payer.name.given_name, brut (le mail d'acces le met en forme avec prenomDe, mails-achat-pur.ts). */
   payeurPrenom: string | null
   capture: CaptureLue | null
+  /** (20/11/2026) Commande au tarif membre (reference_id referenceMembre) ; absent sinon. */
+  membre?: true
 }
 
 export type LectureCommande =
@@ -413,6 +431,7 @@ export function lireCommande(o: Record<string, unknown>): LectureCommande {
       payeurEmail,
       payeurPrenom: typeof objet(payeur.name).given_name === 'string' ? String(objet(payeur.name).given_name).trim() || null : null,
       capture,
+      ...(ref.membre ? { membre: true as const } : {}),
     },
   }
 }
@@ -460,11 +479,14 @@ export function issuePayPal(corps: unknown): string {
 export function noteAcces(p: {
   orderId: string; captureId: string; centimes: number; essai: boolean; renonciationLe: Date | null
   payeurEmail: string | null; email: string | null; offre?: CleOffre
+  /** (20/11/2026) Le slug du tarif membre paye, s'il y en a un. */
+  tarif?: string | null
 }): string {
   const offre = OFFRES_PAYPAL[p.offre ?? 'club']
   const bouts = [
     `PayPal ${offre.nom} : commande ${p.orderId}, capture ${p.captureId}, ${(p.centimes / 100).toFixed(2)} EUR`,
     p.essai ? 'ACHAT TEST (essai a 1 EUR, a rembourser)' : null,
+    p.tarif ? `Tarif membre ${p.tarif}` : null,
     !offre.renonciation ? 'seances a fixer avec Brice, aucun contenu ouvert' : p.renonciationLe ? null : 'renonciation datee de la capture (date de commande illisible)',
     p.payeurEmail && p.payeurEmail !== p.email ? `email du payeur PayPal : ${p.payeurEmail}` : null,
   ]

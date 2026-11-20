@@ -41,6 +41,13 @@ export type OffreEnVente = {
    * titre du module. Absent : le module entier.
    */
   partie?: string | null
+  /**
+   * (20/11/2026) Un tarif membre applique (prix-membre-pur.ts) : le slug de
+   * son offre (module-la-formation-complete-partie-2-membres-bf). stripePriceId
+   * est alors celui du tarif ; offreSlug reste l'offre vendue, que le webhook
+   * ouvre. Absent : le prix courant.
+   */
+  tarif?: string | null
 }
 
 /**
@@ -78,6 +85,8 @@ export function corpsSession(o: OffreEnVente, p: {
   userId: string | null
   email: string | null
   essai: boolean
+  /** (20/11/2026) expires_at (secondes) d'un tarif date : expirationSession, prix-membre-pur.ts. */
+  expiresAt?: number | null
 }): URLSearchParams {
   const c = new URLSearchParams()
   c.set('mode', 'payment')
@@ -106,6 +115,11 @@ export function corpsSession(o: OffreEnVente, p: {
   c.set('payment_intent_data[metadata][source]', 'academie')
   c.set('payment_intent_data[metadata][academie_module]', o.moduleSlug)
   c.set('payment_intent_data[metadata][academie_offre]', o.offreSlug)
+  if (o.tarif) {
+    c.set('metadata[academie_tarif]', o.tarif)
+    c.set('payment_intent_data[metadata][academie_tarif]', o.tarif)
+  }
+  if (typeof p.expiresAt === 'number' && Number.isInteger(p.expiresAt) && p.expiresAt > 0) c.set('expires_at', String(p.expiresAt))
   return c
 }
 
@@ -122,6 +136,8 @@ export type AchatLu = {
   payeLe: Date
   /** Le moment du paiement si l'acheteur a coche la case (consent.terms_of_service = 'accepted'), sinon null. */
   renonciationLe: Date | null
+  /** (20/11/2026) Le tarif membre de la session (metadata academie_tarif), ou null : il va dans la note de l'acces. */
+  tarif?: string | null
 }
 
 export type LectureAchat =
@@ -185,6 +201,8 @@ export function lireAchat(s: Record<string, unknown>): LectureAchat {
       essai: meta.essai === '1',
       payeLe: cree,
       renonciationLe: consent.terms_of_service === 'accepted' ? cree : null,
+      // Pose seulement s'il y en a un : les sessions d'avant restent lues a l'identique.
+      ...(chaine(meta.academie_tarif) ? { tarif: chaine(meta.academie_tarif) } : {}),
     },
   }
 }

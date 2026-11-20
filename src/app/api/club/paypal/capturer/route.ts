@@ -11,6 +11,7 @@ import {
 import { emailConfirme } from '@/lib/academie/achat'
 import { roleAcademie } from '@/lib/academie/droits'
 import { estAdmin } from '@/lib/academie/pur'
+import { prixDuCompte } from '@/lib/academie/prix-membre'
 import { compteDuJeton, corsAcademie, entetesAcademie, refusAcademie, tronquer } from '@/lib/academie/http'
 import { SQL_IDENTITE } from '@/lib/academie/requetes'
 import { messageErreur } from '@/lib/liveclub/pur'
@@ -116,6 +117,31 @@ export async function POST(req: NextRequest) {
       return refus('montant', 409)
     }
   }
+  // (20/11/2026) Une commande au tarif membre (reference_id referenceMembre) : le montant attendu est celui du tarif,
+  // si le titulaire (un compte, jamais un email seul) est membre du Live Club et si la commande a ete CREEE dans la
+  // fenetre du tarif (une commande du lundi 23 h 59 se capture encore apres). Sinon rien n'est capture : une commande
+  // creee dans le navigateur avec ce reference_id ne prouve rien. Reverifie a chaque appel, capture deja faite comprise.
+  let tarif: string | null = null
+  if (lu.commande.membre) {
+    const titulaireMembre = lu.commande.titulaire.userId ?? null
+    if (!titulaireMembre || !lu.commande.creeLe || prixBase === null) {
+      console.warn(`[club/paypal/capturer] commande ${lu.commande.orderId} : tarif membre sans compte, sans date ou sans prix courant, non capturee`)
+      return refus('montant', 409)
+    }
+    try {
+      const calcul = await prixDuCompte({ userId: titulaireMembre, offre: offre.slug, prixCourantEur: prixBase, quand: lu.commande.creeLe })
+      if (!calcul.tarif) {
+        if (calcul.incertain) return refus('indisponible', 503)
+        console.warn(`[club/paypal/capturer] commande ${lu.commande.orderId} offre=${offre.cle} : tarif membre refuse (pas membre ou hors fenetre), non capturee`)
+        return refus('montant', 409)
+      }
+      prixBase = calcul.prixEur
+      tarif = calcul.tarif.slug
+    } catch (err) {
+      console.warn(`[club/paypal/capturer] tarif membre illisible : ${messageErreur(err)}`)
+      return refus('indisponible', 503)
+    }
+  }
   if (!montantConforme(lu.commande, prixBase)) {
     console.warn(`[club/paypal/capturer] commande ${lu.commande.orderId} offre=${offre.cle} : montant inattendu (${lu.commande.centimes} centimes ${lu.commande.devise}${lu.commande.essai ? ', essai' : ''}), non capturee`)
     return refus('montant', 409)
@@ -186,7 +212,7 @@ export async function POST(req: NextRequest) {
       renonciationLe: offre.renonciation ? c.creeLe ?? new Date() : null,
       note: noteAcces({
         orderId: c.orderId, captureId, centimes: centimesPayes, essai: c.essai,
-        renonciationLe: c.creeLe, payeurEmail: c.payeurEmail, email, offre: offre.cle,
+        renonciationLe: c.creeLe, payeurEmail: c.payeurEmail, email, offre: offre.cle, tarif,
       }),
     })
   } catch (err) {
