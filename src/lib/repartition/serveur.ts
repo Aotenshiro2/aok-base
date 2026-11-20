@@ -31,7 +31,7 @@ import {
   libelleTarif, libelleTaux, moisDe, moisParis, moisPrevuCommission, moisValide, partsCommission, pourcent,
   repartitionDuMois, tarifDuMois, tarifsEnVigueur, tauxEnVigueur, venteDePaiement, versEuros,
   type CommissionRetro, PREFIXE_NOTE_ACCORD, accordNote, phraseRetroactif, planRetroactif, texteDepotDejaInscrit,
-  type Devise, deviseOuEuro, montant as enDevise,
+  type Devise, deviseOuEuro, montant as enDevise, nomDevise,
 } from '@/lib/repartition/pur'
 
 const MIGRATION = '20261008170000_cockpit_repartition.sql'
@@ -728,8 +728,10 @@ async function commissionParId(id: string): Promise<LigneCommission | null> {
  * et une carte confirmee plus tard inscrivait la commission une seconde fois.
  */
 async function depotDejaInscrit(partenaireId: string, le: string, base: number, email: string, devise: Devise): Promise<string | null> {
-  // (20/11) Meme devise aussi : 721 USD et 721 EUR ne sont pas le meme depot.
-  // Le montant passe en texte a 2 decimales (jamais un flottant vers ::numeric).
+  // (20/11, relecture) La devise ne compte PAS : meme broker, meme jour, meme
+  // montant, meme personne = doublon. Sinon la meme capture renvoyee sans
+  // devise (defaut EUR) inscrivait un second depot. Le refus dit la devise
+  // inscrite si elle differe. Le montant passe en texte a 2 decimales.
   const lignes = await prisma.$queryRaw<{
     qui: string | null; partenaire: string; le: string; montant_base: number; commission_attendue: number; devise: Devise; statut: string; pose_le: string | null
   }[]>`
@@ -740,7 +742,7 @@ async function depotDejaInscrit(partenaireId: string, le: string, base: number, 
     join public.cockpit_partenaires p on p.partenaire_id = c.partenaire_id
     left join public.cockpit_liveclub_acces a on a.acces_id = c.acces_id
     where c.partenaire_id = ${partenaireId} and c.nature = 'depot' and c.le = ${le}::date
-      and c.montant_base = ${numeric(base)}::numeric and c.devise = ${devise}
+      and c.montant_base = ${numeric(base)}::numeric
       and (lower(c.email) = ${email} or lower(a.email) = ${email})
     order by c.pose_le
     limit 1`
@@ -748,7 +750,7 @@ async function depotDejaInscrit(partenaireId: string, le: string, base: number, 
   if (!d) return null
   return texteDepotDejaInscrit({
     qui: d.qui ?? email, partenaire: d.partenaire, base: centimes(d.montant_base) ?? base, le: d.le,
-    attendue: centimes(d.commission_attendue) ?? 0, devise: deviseOuEuro(d.devise), statut: d.statut, poseLe: d.pose_le,
+    attendue: centimes(d.commission_attendue) ?? 0, devise: deviseOuEuro(d.devise), deviseDemandee: devise, statut: d.statut, poseLe: d.pose_le,
   })
 }
 
@@ -1357,13 +1359,17 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
 
     // Deux cartes confirmees en meme temps : la garde d'en haut a pu passer
     // pour les deux. Relue juste avant l'ecriture, par l'acces cette fois.
-    const doublon = await prisma.$queryRaw<{ n: number }[]>`
-      select count(*)::int as n from public.cockpit_commissions
+    // (20/11, relecture) Sans la devise, comme la garde d'en haut.
+    const doublon = await prisma.$queryRaw<{ devise: Devise }[]>`
+      select devise from public.cockpit_commissions
       where partenaire_id = ${partenaire.partenaire_id} and nature = 'depot' and le = ${le}::date
-        and montant_base = ${numeric(base ?? 0)}::numeric and devise = ${devise}
-        and (acces_id = ${acces?.acces_id ?? null}::uuid or lower(email) = ${email})`
-    if ((doublon[0]?.n ?? 0) > 0) {
-      throw new RefusAction(`Ce dépôt de ${enDevise(base ?? 0, devise)} pour ${quiClient} est déjà inscrit : rien n'a été refait.`)
+        and montant_base = ${numeric(base ?? 0)}::numeric
+        and (acces_id = ${acces?.acces_id ?? null}::uuid or lower(email) = ${email})
+      limit 1`
+    if (doublon[0]) {
+      const inscrite = deviseOuEuro(doublon[0].devise)
+      throw new RefusAction(`Ce dépôt de ${enDevise(base ?? 0, inscrite)} pour ${quiClient} est déjà inscrit`
+        + `${inscrite !== devise ? ` en ${nomDevise(inscrite)}, pas en ${nomDevise(devise)}` : ''} : rien n'a été refait.`)
     }
 
     // (20/11) Montants en texte a 2 decimales (numeric()), plus en flottant :

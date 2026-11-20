@@ -16,7 +16,7 @@ import {
   etapeApresDepot, etapeApresMarquage,
   etatLitige, litigeDeLigne, jourDuLitige, perteDuLitige, phraseReglement, phraseDeTete,
   lireMoisAcces, MOIS_ACCES_DEFAUT, MOIS_ACCES_MAX,
-  lireDevise, deviseOuEuro, montant, planRetroactif, phraseRetroactif, texteDepotDejaInscrit,
+  lireDevise, deviseOuEuro, montant, planRetroactif, phraseRetroactif, texteDepotDejaInscrit, nomDevise,
 } from '../src/lib/repartition/pur.ts'
 import { MOIS_ACCES_BROKER } from '../src/lib/liveclub/config.ts'
 import { readFileSync } from 'node:fs'
@@ -871,6 +871,38 @@ test('devise des depots : lue, gardee, jamais convertie, 70/30 sur les euros rec
   // Le doublon dit la devise.
   assert.match(texteDepotDejaInscrit({ qui: 'x', partenaire: 'RaiseFx', base: 72100, le: '2026-11-12', attendue: 65000, devise: 'USD', statut: 'attendue', poseLe: null }),
     /^Ce dépôt est déjà inscrit : 721 \$ chez RaiseFx pour x, le .*, commission 650 \$ \(attendue\)/)
+})
+
+test('doublon de depot : la devise ne compte pas, le refus dit la devise inscrite', () => {
+  // Scenario : la ligne est inscrite 721 USD, la meme capture revient et
+  // l'agent omet la devise (defaut EUR). Ce doit etre le meme depot.
+  assert.equal(lireDevise(undefined), 'EUR')
+  assert.equal(nomDevise('USD'), 'dollars')
+  assert.equal(nomDevise('EUR'), 'euros')
+  const refus = texteDepotDejaInscrit({
+    qui: 'x', partenaire: 'RaiseFx', base: 72100, le: '2026-11-12', attendue: 65000,
+    devise: 'USD', deviseDemandee: lireDevise(undefined), statut: 'attendue', poseLe: null,
+  })
+  assert.match(refus, /^Ce dépôt est déjà inscrit en dollars, pas en euros : 721 \$ chez RaiseFx/)
+  assert.match(refus, /Rien n'a été refait/)
+  assert.match(refus, /n'en inscris pas une seconde/)
+  // Meme devise : le refus ordinaire, sans mention de devise.
+  assert.doesNotMatch(texteDepotDejaInscrit({ qui: 'x', partenaire: 'RaiseFx', base: 72100, le: '2026-11-12', attendue: 65000, devise: 'USD', deviseDemandee: 'USD', statut: 'attendue', poseLe: null }), /en dollars/)
+
+  // Les gardes en base ne filtrent plus sur la devise (sinon le doublon passe).
+  const rep = readFileSync(new URL('../src/lib/repartition/serveur.ts', import.meta.url), 'utf8')
+  const garde = rep.slice(rep.indexOf('async function depotDejaInscrit('), rep.indexOf('async function commissionsDepuis('))
+  assert.ok(garde.includes('c.montant_base = ${numeric(base)}::numeric'))
+  assert.doesNotMatch(garde, /devise = \$\{devise\}/)
+  assert.match(garde, /deviseDemandee: devise/)
+  const debut = rep.indexOf('Sans la devise, comme la garde')
+  assert.ok(debut > 0)
+  const final = rep.slice(debut, rep.indexOf('insert into public.cockpit_commissions', debut))
+  assert.ok(final.length > 0)
+  assert.doesNotMatch(final, /devise = \$\{devise\}/)
+  assert.match(final, /en \$\{nomDevise\(inscrite\)\}, pas en \$\{nomDevise\(devise\)\}/)
+  const pd = readFileSync(new URL('../src/lib/liveclub/pause-depot.ts', import.meta.url), 'utf8')
+  assert.doesNotMatch(pd, /c\.devise = \$\{/)
 })
 
 console.log(`\n${n} blocs verifies, tout est bon.`)

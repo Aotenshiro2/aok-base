@@ -68,7 +68,7 @@ import {
   BOUTON_LOTS, DELAI_LOTS_JOURS, ETAPES_LOTS, EXEMPLE_LOTS, RELANCE_LOTS_1_JOURS, RELANCE_LOTS_2_AVANT_FIN_JOURS,
   SUIVI_LOTS_DEPUIS, TENUE_LOTS, jourPlus, paragrapheLotsAdmission,
 } from './lots-pur'
-import { centimes, euros, jourCourt, libelleJour, lireDevise, montant as enDevise, slugPartenaire, type Devise } from '../repartition/pur'
+import { centimes, euros, jourCourt, libelleJour, lireDevise, montant as enDevise, nomDevise, slugPartenaire, type Devise } from '../repartition/pur'
 
 // ---------------------------------------------------------------------------
 // L'offre
@@ -405,12 +405,12 @@ function texteCourt(v: unknown, max: number): string | null {
   return s ? s.slice(0, max) : null
 }
 
-/** Des euros dans ]0, max] (ou [0, max]), ou le message d'erreur. */
-function lireMontant(v: unknown, nom: string, max: number, zero = false): number | string {
+/** Un montant dans ]0, max] (ou [0, max]), dans la devise donnee (EUR par defaut), ou le message d'erreur. */
+function lireMontant(v: unknown, nom: string, max: number, zero = false, devise: Devise = 'EUR'): number | string {
   const c = centimes(v)
-  if (c === null) return `${nom} : un montant en euros (ex. 500 ou 49,90).`
+  if (c === null) return `${nom} : un montant en ${nomDevise(devise)} (ex. 500 ou 49,90).`
   if (zero ? c < 0 : c <= 0) return `${nom} : un montant ${zero ? 'positif ou nul' : 'positif'}.`
-  if (c > max * 100) return `${nom} : ${euros(max * 100)} au plus.`
+  if (c > max * 100) return `${nom} : ${enDevise(max * 100, devise)} au plus.`
   return Math.round(c) / 100
 }
 
@@ -435,7 +435,7 @@ export function lireParamsPauseDepot(p: Record<string, unknown>, ctx: { aujourdh
   }
   const devise = lireDevise(p.devise)
   if (!devise) return "devise : EUR ou USD, celle que donne le relevé (vide = EUR). Jamais de conversion : un montant en dollars s'inscrit en USD."
-  const montant = lireMontant(p.montant, 'montant (le dépôt)', 1_000_000)
+  const montant = lireMontant(p.montant, 'montant (le dépôt)', 1_000_000, false, devise)
   if (typeof montant === 'string') return montant
   const brutJour = p.le === null || p.le === undefined ? '' : String(p.le).trim()
   const le = brutJour || ctx.aujourdhui
@@ -451,7 +451,7 @@ export function lireParamsPauseDepot(p: Record<string, unknown>, ctx: { aujourdh
   }
   let commission: number | null = null
   if (p.commission !== null && p.commission !== undefined && p.commission !== '') {
-    const c = lireMontant(p.commission, 'commission (celle de ce dépôt)', 100_000, true)
+    const c = lireMontant(p.commission, 'commission (celle de ce dépôt)', 100_000, true, devise)
     if (typeof c === 'string') return c
     commission = c
   }
@@ -548,7 +548,7 @@ export type AccesExistantPauseDepot = {
 }
 
 /** Un depot deja inscrit (meme broker, meme jour, meme montant, meme personne). */
-export type DepotExistant = { commissionId: string; accesId: string | null }
+export type DepotExistant = { commissionId: string; accesId: string | null; devise?: Devise }
 
 export type LectureBasePauseDepot = {
   acces: AccesExistantPauseDepot | null
@@ -574,6 +574,8 @@ export function etapesPauseDepot(o: {
   abonnement: AbonnementPourPauseDepot
   base: LectureBasePauseDepot
   email: string
+  /** (20/11) La devise de la demande : un depot deja inscrit dans une autre devise est refuse, et le refus la dit. */
+  devise?: Devise
 }): EtapesPauseDepot | string {
   const a = o.abonnement
   if (a.statut === 'past_due' || a.statut === 'unpaid') {
@@ -598,6 +600,10 @@ export function etapesPauseDepot(o: {
 
   let depot: EtapesPauseDepot['depot'] = 'inscrire'
   if (b.depot) {
+    if (b.depot.devise && o.devise && b.depot.devise !== o.devise) {
+      return `Ce dépôt est déjà inscrit en ${nomDevise(b.depot.devise)}, pas en ${nomDevise(o.devise)} (même broker, même jour, même montant, même personne) : `
+        + "rien n'est proposé. Si la devise inscrite est fausse, corrige cette ligne, n'en inscris pas une seconde."
+    }
     if (b.depot.accesId === null) depot = 'relier'
     else if (b.acces && b.depot.accesId === b.acces.accesId) depot = 'garder'
     else return 'Ce dépôt est déjà inscrit sur un autre accès broker : rien n\'est proposé.'
@@ -799,7 +805,7 @@ export async function executerPauseDepotAvec(p: ParamsPauseDepot, outils: Outils
   const a = await outils.lireAbonnement(p.abonnement_id)
   if (!a) throw new RefusPauseDepot(`Abonnement ${p.abonnement_id} introuvable chez Stripe (ou ce n'est plus un abonnement Live Club) : rien n'a été fait.`)
   const base = await outils.lireBase(p, a.id)
-  const etapes = etapesPauseDepot({ abonnement: a, base, email: p.email })
+  const etapes = etapesPauseDepot({ abonnement: a, base, email: p.email, devise: p.devise })
   if (typeof etapes === 'string') throw new RefusPauseDepot(etapes)
   const plan = datesPauseDepot(a, etapes, p.mois)
   if (!plan) throw new RefusPauseDepot("Dates de son abonnement illisibles : rien n'a été fait, réessaie dans un instant.")

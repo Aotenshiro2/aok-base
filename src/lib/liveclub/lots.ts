@@ -33,7 +33,7 @@ import {
 import { nomTelegram } from '@/lib/alerte-equipe-telegram'
 import { RefusAction, journaliserGesteLiveClub, validerAction } from '@/lib/stripe-actions'
 import { executerActionRepartition } from '@/lib/repartition/serveur'
-import { centimes, euros, montant as enDevise } from '@/lib/repartition/pur'
+import { centimes, montant as enDevise } from '@/lib/repartition/pur'
 import { rendreVisible } from '@/lib/securite/injection-pur'
 import { chatId, fermetureDepotPerduActive, suiviLotsActif } from './config'
 import { droitLiveClub } from './droits'
@@ -186,7 +186,7 @@ async function envoyerCarteLots(
       partenaire: ligne.partenaire,
       depot: ligne.montantBase === null ? null : enDevise(centimes(ligne.montantBase) ?? 0, ligne.devise),
       depotLe: ligne.depotLe,
-      commission: euros(centimes(ligne.commissionAttendue) ?? 0),
+      commission: enDevise(centimes(ligne.commissionAttendue) ?? 0, ligne.devise),
       enPause: o.enPause,
       lotsLe: o.lotsLe,
     })

@@ -161,6 +161,11 @@ export function montant(c: number, devise: Devise = 'EUR'): string {
   return devise === 'USD' ? `${e.slice(0, -1)}$` : e
 }
 
+/** 'euros' ou 'dollars', pour les phrases (« déjà inscrit en dollars »). */
+export function nomDevise(devise: Devise): string {
+  return devise === 'USD' ? 'dollars' : 'euros'
+}
+
 /** « 50 » -> '50 %', 12.5 -> '12,5 %'. */
 export function pourcent(p: number): string {
   return `${String(Math.round(p * 100) / 100).replace('.', ',')} %`
@@ -1864,9 +1869,15 @@ export function phraseRetroactif(plan: PlanRetroactif, depuis: string): string {
 }
 
 /** (29/10) Le refus d'un depot deja inscrit (garde sans limite de temps, Victor Weber). */
-export function texteDepotDejaInscrit(o: { qui: string; partenaire: string; base: number; le: string; attendue: number; devise?: Devise; statut: string; poseLe: string | null }): string {
+// (20/11, relecture) La devise ne compte pas dans la garde : la meme capture
+// renvoyee sans devise (defaut EUR) doit etre reconnue. deviseDemandee = celle
+// de la nouvelle demande ; si elle differe, le refus dit la devise inscrite.
+export function texteDepotDejaInscrit(o: { qui: string; partenaire: string; base: number; le: string; attendue: number; devise?: Devise; deviseDemandee?: Devise; statut: string; poseLe: string | null }): string {
   const d = o.devise ?? 'EUR'
-  return `Ce dépôt est déjà inscrit : ${montant(o.base, d)} chez ${o.partenaire} pour ${o.qui}, le ${libelleJour(o.le)}, `
+  const autre = o.deviseDemandee !== undefined && o.deviseDemandee !== d
+  const enAutre = autre ? ` en ${nomDevise(d)}, pas en ${nomDevise(o.deviseDemandee as Devise)}` : ''
+  const fin = autre ? ` Même broker, même jour, même montant, même personne : c'est le même dépôt. Si la devise inscrite est fausse, corrige cette ligne, n'en inscris pas une seconde.` : ''
+  return `Ce dépôt est déjà inscrit${enAutre} : ${montant(o.base, d)} chez ${o.partenaire} pour ${o.qui}, le ${libelleJour(o.le)}, `
     + `commission ${montant(o.attendue, d)} (${o.statut === 'attendue' ? 'attendue' : o.statut === 'recue' ? 'reçue' : 'perdue'})`
-    + `${o.poseLe ? `, inscrit le ${libelleJour(o.poseLe.slice(0, 10))}` : ''}. Rien n'a été refait : un dépôt ne s'inscrit qu'une fois.`
+    + `${o.poseLe ? `, inscrit le ${libelleJour(o.poseLe.slice(0, 10))}` : ''}. Rien n'a été refait : un dépôt ne s'inscrit qu'une fois.${fin}`
 }

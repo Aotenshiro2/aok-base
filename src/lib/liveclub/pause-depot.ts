@@ -18,7 +18,7 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
 import { RefusAction, journaliserGesteLiveClub, type ActionAgent } from '@/lib/stripe-actions'
 import { contexteParis, depotPourPauseDepot, noteDepotPourPause, type DepotPourPause } from '@/lib/repartition/serveur'
-import { centimes, montant as enDevise } from '@/lib/repartition/pur'
+import { centimes, deviseOuEuro, montant as enDevise } from '@/lib/repartition/pur'
 
 /** (20/11) Des centimes en texte '650.93' pour un ::numeric (jamais un flottant : 650.9299999999999 le 12/11). */
 const texteNumeric = (c: number) => (Math.round(c) / 100).toFixed(2)
@@ -156,12 +156,14 @@ async function lireBase(db: Db, p: ParamsPauseDepot, abonnementId: string): Prom
     where lower(a.email) = ${p.email} and a.motif = 'broker'
     limit 1`
   const emails = [p.email, ...(p.email_abonnement ? [p.email_abonnement] : [])]
-  const depot = await db.$queryRaw<{ commission_id: string; acces_id: string | null }[]>`
-    select c.commission_id::text as commission_id, c.acces_id::text as acces_id
+  // (20/11, relecture) Sans la devise : meme broker, meme jour, meme montant,
+  // meme personne = le meme depot ; etapesPauseDepot refuse si la devise differe.
+  const depot = await db.$queryRaw<{ commission_id: string; acces_id: string | null; devise: string }[]>`
+    select c.commission_id::text as commission_id, c.acces_id::text as acces_id, c.devise
     from public.cockpit_commissions c
     left join public.cockpit_liveclub_acces a on a.acces_id = c.acces_id
     where c.partenaire_id = ${p.partenaire} and c.nature = 'depot' and c.le = ${p.le}::date
-      and c.montant_base = ${texteNumeric(centimes(p.montant) ?? 0)}::numeric and c.devise = ${p.devise ?? 'EUR'}
+      and c.montant_base = ${texteNumeric(centimes(p.montant) ?? 0)}::numeric
       and (lower(c.email) = any(${emails}::text[]) or lower(a.email) = any(${emails}::text[]))
     order by c.pose_le
     limit 1`
@@ -178,7 +180,7 @@ async function lireBase(db: Db, p: ParamsPauseDepot, abonnementId: string): Prom
         telegramId: a.telegram_id === null ? null : Number(a.telegram_id),
       }
       : null,
-    depot: depot[0] ? { commissionId: depot[0].commission_id, accesId: depot[0].acces_id } : null,
+    depot: depot[0] ? { commissionId: depot[0].commission_id, accesId: depot[0].acces_id, devise: deviseOuEuro(depot[0].devise) } : null,
     pauseDuParcours: pause[0]?.reprise ?? null,
   }
 }
@@ -247,7 +249,7 @@ export async function controlerPauseDepot(action: ActionAgent): Promise<Controle
   }
   const a = versAbonnement(enCours[0])
   const base = await lireBase(prisma, p, a.id)
-  const etapes = etapesPauseDepot({ abonnement: a, base, email: p.email })
+  const etapes = etapesPauseDepot({ abonnement: a, base, email: p.email, devise: p.devise })
   if (typeof etapes === 'string') return { erreur: etapes }
   const plan = datesPauseDepot(a, etapes, p.mois)
   if (!plan) return { erreur: "Dates de son abonnement illisibles chez Stripe : réessaie dans un instant." }
@@ -371,7 +373,7 @@ export async function executerPauseDepot(action: ActionAgent, acteur: string): P
         await verrou(tx, `liveclub:acces:${o.p.email}`)
         // Relu sous les verrous : la carte a pu etre confirmee deux fois.
         const base = await lireBase(tx, o.p, abonnementId)
-        const relu = etapesPauseDepot({ abonnement: o.abonnement, base, email: o.p.email })
+        const relu = etapesPauseDepot({ abonnement: o.abonnement, base, email: o.p.email, devise: o.p.devise })
         if (typeof relu === 'string') throw new RefusPauseDepot(relu)
         if (relu.acces !== o.etapes.acces || relu.depot !== o.etapes.depot) {
           throw new RefusPauseDepot("L'accès ou le dépôt a changé depuis la lecture (carte confirmée deux fois ?) : redemande la carte, rien n'a été fait.")
