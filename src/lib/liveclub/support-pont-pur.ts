@@ -369,6 +369,10 @@ export const LIGNE_MAIN_RENDUE = "Main rendue au bot par l'équipe."
 export const INTERVALLE_ALERTES_MS = 10 * 60 * 1000
 /** La ligne « [système] » posee au fil quand l'equipe est prevenue : elle date la derniere alerte. */
 export const LIGNE_EQUIPE_PREVENUE = 'Équipe prévenue (Agent AOK et email).'
+/** (20/11) Le message « [système] » qui date une alerte, pour un fil ecrit hors du bot (route /api/support/escalate). */
+export function ligneEquipePrevenue(atIso: string): { role: 'system'; content: string; at: string } {
+  return { role: 'system', content: `${PREFIXE_SYSTEME}${LIGNE_EQUIPE_PREVENUE}`, at: atIso }
+}
 
 // (05/11, Brice) « DÉJÀ TRAITÉ » : une demande d'humain reglee HORS du bot
 // (WhatsApp, email, en direct) gardait « veut un humain » pour rien. Le bouton

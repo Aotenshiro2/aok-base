@@ -1,5 +1,18 @@
 # ETAT du journal d etudes
 
+## FRICTIONS DE MELANIE AVEC AGENT AOK (20/11/2026, commite NON pousse, branche frictions-melanie ; aucune migration)
+
+- Analyse : D:\6_Societe\Pilotage\Data-Performance\agent-cockpit\frictions-melanie-2026-11-20.md.
+- Consignes (agent-cockpit.ts) : « DEUX ÉCHANGES AU PLUS » en tete du prompt (un seul tour de precision, dire tout
+  de suite ce qu'on ne sait pas faire, lecture la plus naturelle) ; « JAMAIS DE NUMÉRO DE COMPTE À DEMANDER » (cas de
+  Tony) ; cockpit_abonnements documente montant_paye et remise* et « combien a X EUR » compte montant_paye (cas du
+  20/11 avec Brice : 139 EUR) ; « la suite » sous le resume court.
+- Message renvoye a l'identique (messageRenvoye, agent-cockpit-pur.ts) : une note au modele pour ce tour.
+- Resume du matin : Melanie (libelle du compte Telegram) recoit composerResumeCourt (rubriques d'action seules, relances
+  d'Alex en une ligne, « À contacter » a 5 lignes, le reste dans l'historique de l'agent, pas de « Bientôt »). Brice : inchange.
+- Support du site (/api/support/escalate) : une alerte par fil et par 10 minutes (alerteAutorisee, ligne « Équipe prévenue »).
+- Verif : node scripts/verifier-frictions-melanie.mjs (14 blocs).
+
 ## DEPOTS BROKER : LA DEVISE EST GARDEE, LE 70/30 SUR LES EUROS RECUS (20/11/2026, decision de Brice du 12/11, option A ; commite NON pousse, branche devise-depots ; migration NON appliquee)
 
 - Cause : rapport D:\6_Societe\Pilotage\Data-Performance\agent-cockpit\rapport-2026-11-12.md (721 USD convertis a la main par Melanie).
