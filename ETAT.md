@@ -1,5 +1,25 @@
 # ETAT du journal d etudes
 
+## CARTES A BOUTONS ENVOYEES A PLUSIEURS COMPTES : FERMEES CHEZ TOUT LE MONDE APRES LA DECISION (21/11/2026, commite NON pousse, branche cartes-equipe ; aucune migration)
+
+- Cause : la carte « Lots à vérifier » partait a chaque compte de l'equipe ; Mel repond « Oui », Brice garde la carte
+  et ses deux boutons des heures apres (« ne pas être laissé en suspens sur la question de l'agent »).
+- Utilitaire commun : src/lib/cartes-equipe-pur.ts (ligne de fin « Validé par Mel, le 20/11 à 14 h 02 : lots notés
+  faits. » / « Mel a répondu non, le 20/11 à 14 h 02. », heure de Paris, cartes a fermer = toutes sauf la cliquee,
+  classement des refus Telegram) et src/lib/cartes-equipe.ts (envoyerCarteEquipe rend { chat, message },
+  fermerCartesEquipe : editMessageText carte + ligne, sans boutons ; ne jette jamais, log sans identifiant).
+  tgCockpitAppel (agent-cockpit-telegram.ts) rend le resultat de Telegram ; tgCockpit passe par lui (inchange).
+- Lots (liveclub/lots.ts) : message_id des cartes gardes dans details.cartes de la declaration (geste acces_broker
+  lots_declares) ; fermeture des autres cartes APRES la decision ecrite et dite, seulement si elle a abouti ; texte de
+  la carte = celui de la carte cliquee, sinon l'historique d'Agent AOK (lots-<id>-texte), sinon boutons seuls retires.
+  Clic tardif : notification « Déjà traité par Mel, le 20/11 à 14 h 02 : ... » et sa carte fermee avec la ligne.
+- Cartes d'avant le 21/11 : pas de message_id, aucun rattrapage possible par l'API des bots (pas de lecture des
+  messages d'un chat) ; le clic tardif les ferme une par une.
+- PAS touchees (liste au rapport du 21/11) : corrections de @ (corrections-pseudo.ts, pas de champ JSON), alerte
+  « un membre demande un humain » (Rendre la main / Déjà traité), cartes proposerCarteEquipe (declaration de depot
+  de pause-depot.ts, cartes de fin de mois). Propositions de Tab : deja fermees partout (tab/repondre.ts, clore).
+- Verif : node scripts/verifier-cartes-equipe.mjs (9 blocs) ; editMessageText et ses refus NON essayes en reel.
+
 ## FRICTIONS DE MELANIE AVEC AGENT AOK (20/11/2026, commite NON pousse, branche frictions-melanie ; aucune migration)
 
 - Analyse : D:\6_Societe\Pilotage\Data-Performance\agent-cockpit\frictions-melanie-2026-11-20.md.
