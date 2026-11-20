@@ -43,6 +43,54 @@ export function estMelanie(qui: string | null | undefined): boolean {
   return s === 'melanie' || s === 'mel'
 }
 
+// ---------------------------------------------------------------------------
+// (20/11, cas de Tony) UN MESSAGE RENVOYE A L'IDENTIQUE. Melanie a renvoye mot
+// pour mot sa demande : la reponse precedente ne l'avait pas aidee, et l'agent
+// a repose la meme question. Detection en code pur, puis une note au modele
+// pour ce tour (boucleAgent) : aucun appel en plus.
+// ---------------------------------------------------------------------------
+
+/** En dessous, un renvoi (« oui », « ok », « merci ») n'est pas une demande repetee. */
+export const LONGUEUR_MIN_RENVOI = 12
+
+/** Le texte d'un message de l'historique (chaine, ou blocs texte joints) ; null sans texte. */
+export function texteDuMessage(content: unknown): string | null {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return null
+  const t = content
+    .map(b => (b && typeof b === 'object' && (b as { type?: unknown }).type === 'text' ? String((b as { text?: unknown }).text ?? '') : ''))
+    .filter(Boolean).join('\n')
+  return t || null
+}
+
+/** Mêmes mots, a la casse et aux espaces pres. */
+export function normaliserRenvoi(t: string): string {
+  return t.normalize('NFC').toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Le dernier message de l'interlocuteur est-il identique (a la casse et aux
+ * espaces pres) a son message precedent ? Les lignes « [système] » (alertes,
+ * resume du matin) et les messages sans texte (resultats d'outils) sont
+ * sautees ; il faut une reponse de l'agent entre les deux.
+ */
+export function messageRenvoye(historique: readonly { role?: unknown; content?: unknown }[]): boolean {
+  const vus: string[] = []
+  let reponseEntre = false
+  for (let i = historique.length - 1; i >= 0 && vus.length < 2; i--) {
+    const m = historique[i]
+    if (m?.role === 'assistant') { if (vus.length === 1) reponseEntre = true; continue }
+    if (m?.role !== 'user') continue
+    const t = texteDuMessage(m.content)
+    if (!t || t.trim().startsWith('[système]')) continue
+    vus.push(normaliserRenvoi(t))
+  }
+  return vus.length === 2 && reponseEntre && vus[0].length >= LONGUEUR_MIN_RENVOI && vus[0] === vus[1]
+}
+
+/** La note ajoutee au systeme pour ce tour quand messageRenvoye est vrai. */
+export const CONSIGNE_MESSAGE_RENVOYE = "MESSAGE RENVOYÉ À L'IDENTIQUE : ton interlocuteur vient de te renvoyer mot pour mot son message précédent. Ta réponse précédente ne l'a pas aidé. Ne repose pas la même question, même reformulée, et ne redemande rien qu'il ne t'a pas déjà donné. Refais d'abord les recherches que son message permet (email, nom, pseudo), au cas où la première fois en aurait manqué une. Puis réponds en deux ou trois lignes : ce que tu as cherché et où, ce que tu as trouvé ou pas, et UNE seule option concrète (un candidat à confirmer, la carte que tu peux proposer, ou ce que tu ne peux pas faire et qui peut le faire)."
+
 /**
  * L'auteur d'une demande : le libelle du compte Telegram de l'equipe
  * (cockpit_telegram_comptes) quand il est connu, sinon 'cockpit:<uuid>'.

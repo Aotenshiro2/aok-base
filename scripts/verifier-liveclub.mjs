@@ -1515,7 +1515,7 @@ test('exemption proposee par l agent du Cockpit : parametres (08/10)', () => {
   assert.equal(lireParamsExemption({ telegram_id: 123456789, motif: 'admin', jusquau: jour, qui: 'P' }, jour).jusquau, jour)
   // Refus : pas de compte Telegram (on le demande, on ne le devine pas), motif inconnu, date passee ou illisible, qui absent.
   const refus = (p) => typeof lireParamsExemption(p, jour) === 'string'
-  assert.ok(lireParamsExemption({ motif: 'admin', qui: 'P' }, jour).includes('demande le compte Telegram'))
+  assert.ok(lireParamsExemption({ motif: 'admin', qui: 'P' }, jour).includes("demande son nom tel qu'il apparaît dans le groupe (jamais un numéro de compte)"))
   assert.ok(refus({ telegram_id: '@paul', motif: 'admin', qui: 'P' }))
   assert.ok(refus({ telegram_id: 123456789, motif: 'cadeau', qui: 'P' }))
   assert.ok(refus({ telegram_id: 123456789, motif: 'admin', jusquau: '2026-10-07', qui: 'P' }))

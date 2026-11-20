@@ -1918,7 +1918,7 @@ export type ParamsExemption = {
 export function lireParamsExemption(p: Record<string, unknown>, aujourdhui: string): ParamsExemption | string {
   const telegramId = lireTelegramId(p.telegram_id)
   if (telegramId === null) {
-    return "telegram_id invalide : le numéro du compte Telegram (u suivi de chiffres, sans le u). S'il est inconnu, demande le compte Telegram de la personne avant de proposer."
+    return "telegram_id invalide : le numéro du compte Telegram (u suivi de chiffres, sans le u). S'il est inconnu, cherche-le par nom dans le registre du groupe (nom_affiche, historique des noms) ; sans candidat, demande son nom tel qu'il apparaît dans le groupe (jamais un numéro de compte) avant de proposer."
   }
   const motif = String(p.motif ?? '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
   if (!(MOTIFS_EXEMPTION as readonly string[]).includes(motif)) {
