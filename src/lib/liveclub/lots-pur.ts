@@ -43,6 +43,8 @@
 //   SUIVI_LOTS_DEPUIS, pas de leur entree (aucune pause retroactive) ;
 // - LIVECLUB_SUIVI_LOTS=0 coupe tout le suivi (config.ts, suiviLotsActif).
 
+import { ligneDecisionEquipe, momentParis } from '../cartes-equipe-pur'
+
 /**
  * (31/10) Le delai pour trader ses premiers lots, en jours, depuis le depart
  * du suivi (departLots). Brice, 31/10 : 3 semaines.
@@ -379,9 +381,21 @@ export function texteCarteLots(o: {
 }
 
 /** Une carte deja tranchee (un autre clic, ou l'autre membre de l'equipe). */
-export function texteLotsDejaDecides(regle: string | null, par: string | null): string {
+export function texteLotsDejaDecides(regle: string | null, par: string | null, le?: Date | string | null): string {
   const quoi = regle === 'lots_confirmes' ? 'lots notés tradés' : regle === 'lots_pas_vus' ? 'lots pas encore vus' : null
-  return quoi ? `Déjà traité${par ? ` par ${par}` : ''} : ${quoi}.` : 'Cette carte est introuvable.'
+  const quand = momentParis(le)
+  return quoi ? `Déjà traité${par ? ` par ${par}` : ''}${quand ? `, ${quand}` : ''} : ${quoi}.` : 'Cette carte est introuvable.'
+}
+
+/**
+ * (21/11) La ligne de fin de la carte des lots, chez les AUTRES comptes de
+ * l'equipe (et sur une carte cliquee trop tard) : qui a decide, quand, quoi.
+ * null pour une regle inconnue (carte introuvable : rien a ecrire).
+ */
+export function ligneDecisionLots(regle: string | null, par: string | null, le: Date | string | null | undefined): string | null {
+  if (regle === 'lots_confirmes') return ligneDecisionEquipe({ verbe: 'oui', par, le, quoi: 'lots notés faits' })
+  if (regle === 'lots_pas_vus') return ligneDecisionEquipe({ verbe: 'non', par, le })
+  return null
 }
 
 /** Le marqueur de l'historique d'Agent AOK : la carte n'est pas une question de l'equipe. */

@@ -15,7 +15,12 @@
 //   executerActionRepartition : la commission est prevue a la fin du mois des
 //   lots, moisPrevuCommission), puis le membre prevenu, et s'il est hors du
 //   groupe (acces en pause), son lien de retour tout de suite. Non = le membre
-//   prevenu que l'equipe ne les voit pas encore.
+//   prevenu que l'equipe ne les voit pas encore. (21/11, Brice) Apres la
+//   decision, les cartes des AUTRES comptes se ferment (boutons retires,
+//   « Validé par Mel, le 20/11 à 14 h 02 : lots notés faits. ») : leurs
+//   message_id sont gardes dans details.cartes de la declaration
+//   (cartes-equipe.ts). Un echec de fermeture n'annule rien ; un clic tardif
+//   dit qui a deja decide et quand, et ferme sa carte.
 // - retourApresLots : le lien de retour apres des lots notes faits, une fois
 //   par depot (reserve), aussi appele par le filet du passage quotidien.
 //
@@ -31,6 +36,8 @@ import {
   ajouterAHistoriqueAgent, tgCockpit, type ClicAgentTelegram, type CompteCockpitTelegram,
 } from '@/lib/agent-cockpit-telegram'
 import { nomTelegram } from '@/lib/alerte-equipe-telegram'
+import { envoyerCarteEquipe, fermerCartesEquipe } from '@/lib/cartes-equipe'
+import { cartesAFermer, lireCartesEquipe, type CarteEquipe } from '@/lib/cartes-equipe-pur'
 import { RefusAction, journaliserGesteLiveClub, validerAction } from '@/lib/stripe-actions'
 import { executerActionRepartition } from '@/lib/repartition/serveur'
 import { centimes, montant as enDevise } from '@/lib/repartition/pur'
@@ -45,7 +52,7 @@ import {
   BOUTON_LOTS, MARQUEUR_ALERTE_DEPOT, MARQUEUR_CARTE_LOTS, PHRASE_CARTE_PERTE_FERME,
   TEXTE_DEPOT_REGULARISE_RETOUR, TEXTE_DEPOT_REGULARISE_SANS_LIEN,
   TEXTE_LOTS_CONFIRMES, TEXTE_LOTS_CONFIRMES_RETOUR, TEXTE_LOTS_CONFIRMES_SANS_LIEN,
-  clavierCarteLots, decisionDeclarationLots, etatLots, lotsEnRetard, phraseApresRegularisation, texteAlerteDepotPerdu,
+  clavierCarteLots, decisionDeclarationLots, etatLots, ligneDecisionLots, lotsEnRetard, phraseApresRegularisation, texteAlerteDepotPerdu,
   texteCarteLots, texteDeclarationLots, texteLotsDejaDecides, texteLotsPasVus,
   type EtatLots, type IssueDeclarationLots, type IssueFermetureDepot, type VerbeLots,
 } from './lots-pur'
@@ -193,15 +200,28 @@ async function envoyerCarteLots(
     const equipe = await prisma.$queryRaw<{ telegram_id: bigint }[]>`
       select telegram_id from public.cockpit_telegram_comptes where diffusion = 'equipe' order by cree_le`
     let livres = 0
+    const cartes: CarteEquipe[] = []
     for (const dest of equipe) {
       const chat = Number(dest.telegram_id)
       if (!Number.isSafeInteger(chat) || chat <= 0) continue
-      if (!await tgCockpit('sendMessage', { chat_id: chat, text: texte, reply_markup: { inline_keyboard: clavierCarteLots(id) } })) continue
+      const partie = await envoyerCarteEquipe(chat, texte, clavierCarteLots(id))
+      if (!partie) continue
       livres++
+      if (partie.message > 0) cartes.push(partie)
       await ajouterAHistoriqueAgent(chat, chat, [
         { role: 'user', content: MARQUEUR_CARTE_LOTS, id: `lots-${id}` },
         { role: 'assistant', content: texte, id: `lots-${id}-texte` },
       ]).catch(() => false)
+    }
+    // (21/11) Les cartes parties, dans la declaration : apres la decision de
+    // l'un, celles des autres se ferment (fermerCartesEquipe). Un echec ici ne
+    // retire rien : la carte non notee se rattrape au clic tardif.
+    if (cartes.length > 0) {
+      await prisma.$executeRaw`
+        update public.cockpit_liveclub_gestes
+        set details = coalesce(details, '{}'::jsonb) || jsonb_build_object('cartes', ${JSON.stringify(cartes)}::jsonb)
+        where geste_id = ${id}`
+        .catch(err => console.warn(`[liveclub/lots] cartes non notees : ${messageErreur(err).slice(0, 160)}`))
     }
     return livres
   } catch (err) {
@@ -215,10 +235,14 @@ async function envoyerCarteLots(
 // ---------------------------------------------------------------------------
 
 type Decision =
-  | { genre: 'introuvable' | 'deja'; regle: string | null; par: string | null }
+  | { genre: 'introuvable' | 'deja'; regle: string | null; par: string | null; le: Date | null }
   | {
     genre: VerbeLots; declaration: number; decisionId: number; membre: number | null
     commissionId: string; accesId: string | null; lotsLe: string
+    /** (21/11) Qui decide (libelle du compte) et quand, pour la ligne de fin des autres cartes. */
+    par: string | null; le: Date
+    /** (21/11) Les cartes parties a l'equipe (details.cartes de la declaration) ; [] avant ce correctif. */
+    cartes: CarteEquipe[]
   }
 
 /**
@@ -233,26 +257,28 @@ export async function deciderLots(
     select telegram_id, details, fait_le from public.cockpit_liveclub_gestes
     where geste_id = ${id} and geste = 'acces_broker' and regle = 'lots_declares' and resultat = 'fait'
     for update`
-  if (!d) return { genre: 'introuvable', regle: null, par: null }
-  const [deja] = await tx.$queryRaw<{ regle: string; par: string | null }[]>`
-    select regle, details->>'par' as par from public.cockpit_liveclub_gestes
+  if (!d) return { genre: 'introuvable', regle: null, par: null, le: null }
+  const [deja] = await tx.$queryRaw<{ regle: string; par: string | null; fait_le: Date | null }[]>`
+    select regle, details->>'par' as par, fait_le from public.cockpit_liveclub_gestes
     where geste = 'acces_broker' and regle in ('lots_confirmes', 'lots_pas_vus') and resultat = 'fait'
       and details->>'declaration' = ${String(id)}
+    order by geste_id
     limit 1`
-  if (deja) return { genre: 'deja', regle: deja.regle, par: deja.par }
+  if (deja) return { genre: 'deja', regle: deja.regle, par: deja.par, le: deja.fait_le }
   const details = d.details ?? {}
   const commissionId = typeof details.commission_id === 'string' ? details.commission_id : ''
   const accesId = typeof details.acces_id === 'string' ? details.acces_id : null
   const lotsLe = typeof details.lots_le === 'string' ? details.lots_le : jourParis(d.fait_le.toISOString())
   const par = compte.libelle?.trim().slice(0, 60) || null
-  const [ligne] = await tx.$queryRaw<{ geste_id: bigint }[]>`
+  const [ligne] = await tx.$queryRaw<{ geste_id: bigint; fait_le: Date }[]>`
     insert into public.cockpit_liveclub_gestes (telegram_id, geste, resultat, acteur, regle, details)
     values (${d.telegram_id}, 'acces_broker', 'fait', ${`agent:${compte.userId}`}, ${verbe === 'oui' ? 'lots_confirmes' : 'lots_pas_vus'},
             ${JSON.stringify({ declaration: String(id), commission_id: commissionId, acces_id: accesId, lots_le: lotsLe, par })}::jsonb)
-    returning geste_id`
+    returning geste_id, fait_le`
   return {
     genre: verbe, declaration: id, decisionId: Number(ligne.geste_id),
     membre: d.telegram_id === null ? null : Number(d.telegram_id), commissionId, accesId, lotsLe,
+    par, le: ligne.fait_le ?? new Date(), cartes: lireCartesEquipe(details.cartes),
   }
 }
 
@@ -280,8 +306,17 @@ export async function traiterBoutonLots(
     return
   }
   if (d.genre === 'introuvable' || d.genre === 'deja') {
-    await acquitter(texteLotsDejaDecides(d.regle, d.par))
-    await retirerBoutons()
+    await acquitter(texteLotsDejaDecides(d.regle, d.par, d.le))
+    // (21/11) Clic tardif (carte restee ouverte : fermeture ratee, ou carte
+    // d'avant le 21/11) : cette carte se ferme avec la ligne de la decision.
+    const fin = d.genre === 'deja' ? ligneDecisionLots(d.regle, d.par, d.le) : null
+    const carte = typeof cq.message?.text === 'string' && cq.message.text.trim() ? cq.message.text : null
+    if (fin && carte && Number.isSafeInteger(messageId) && messageId > 0) {
+      const b = await fermerCartesEquipe([{ chat: chatIdEquipe, message: messageId }], { carte, fin, journal: '[liveclub/lots] clic tardif' })
+      if (b.fermees === 0) await retirerBoutons()
+    } else {
+      await retirerBoutons()
+    }
     return
   }
   const prise = d as Extract<Decision, { declaration: number }>
@@ -301,6 +336,45 @@ export async function traiterBoutonLots(
   await ajouterAHistoriqueAgent(chatIdEquipe, telegramIdEquipe, [
     { role: 'assistant', content: texte.texte, id: `lots-${prise.declaration}-decision-${prise.decisionId}` },
   ]).catch(() => false)
+  // (21/11) APRES la decision, ecrite et dite : les cartes des autres comptes
+  // se ferment. Un echec ne touche jamais la decision (fermerCartesEquipe ne
+  // jette pas, et ce bloc est garde).
+  if (texte.ok) {
+    await fermerAutresCartesLots(prise, { chat: chatIdEquipe, message: Number.isSafeInteger(messageId) && messageId > 0 ? messageId : null }, cq.message?.text)
+      .catch(err => console.warn(`[liveclub/lots] autres cartes non fermees : ${messageErreur(err).slice(0, 160)}`))
+  }
+}
+
+/**
+ * (21/11) Les cartes des AUTRES comptes de l'equipe, apres une decision :
+ * le texte de la carte (celui de la carte cliquee, sinon celui garde dans
+ * l'historique d'Agent AOK) et la ligne de fin, sans boutons. Sans texte
+ * connu : seuls les boutons sont retires.
+ */
+async function fermerAutresCartesLots(
+  d: Extract<Decision, { declaration: number }>, cliquee: { chat: number; message: number | null }, texteClique: string | undefined,
+): Promise<void> {
+  const autres = cartesAFermer(d.cartes, cliquee)
+  if (autres.length === 0) return
+  const fin = ligneDecisionLots(d.genre === 'oui' ? 'lots_confirmes' : 'lots_pas_vus', d.par, d.le)
+  if (!fin) return
+  const carte = typeof texteClique === 'string' && texteClique.trim() ? texteClique : await texteCarteGardee(d.declaration)
+  await fermerCartesEquipe(autres, { carte, fin, journal: '[liveclub/lots] autres cartes' })
+}
+
+/** Le texte de la carte tel qu'il est entre a l'historique d'Agent AOK (id lots-<declaration>-texte), ou null. */
+async function texteCarteGardee(declaration: number): Promise<string | null> {
+  try {
+    const [l] = await prisma.$queryRaw<{ texte: string | null }[]>`
+      select e->>'content' as texte
+      from public.cockpit_agent_conversations c,
+        jsonb_array_elements(case when jsonb_typeof(c.messages) = 'array' then c.messages else '[]'::jsonb end) as e
+      where e->>'id' = ${`lots-${declaration}-texte`}
+      limit 1`
+    return l?.texte?.trim() ? l.texte : null
+  } catch {
+    return null
+  }
 }
 
 /** La decision n'a pas abouti : elle ne compte pas, la carte (et celle de l'autre) peut resservir. */

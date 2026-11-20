@@ -141,10 +141,22 @@ export async function transcrireVocalTelegram(
  * accepte (un refus est loggue, sans le texte du message).
  */
 export async function tgCockpit(methode: string, params: Record<string, unknown>): Promise<boolean> {
+  return (await tgCockpitAppel(methode, params)).ok
+}
+
+/**
+ * (21/11) Le meme appel, avec ce que Telegram rend : `resultat` (le message
+ * envoye, pour garder son message_id) ou `description` (la raison d'un refus,
+ * pour la classer : message trop ancien, supprime, bot bloque). Ne jette
+ * jamais ; un refus est loggue comme tgCockpit, sans le texte du message.
+ */
+export async function tgCockpitAppel(
+  methode: string, params: Record<string, unknown>,
+): Promise<{ ok: true; resultat: unknown } | { ok: false; description: string }> {
   const jeton = jetonBot()
   if (!jeton) {
     console.error(`[cockpit/telegram] ${methode} : TELEGRAM_BOT_TOKEN_COCKPIT absent du projet journal`)
-    return false
+    return { ok: false, description: 'jeton absent' }
   }
   try {
     const reponse = await fetch(`${API_TG}/bot${jeton}/${methode}`, {
@@ -155,12 +167,18 @@ export async function tgCockpit(methode: string, params: Record<string, unknown>
     if (!reponse.ok) {
       const corps = await reponse.text()
       console.error(`[cockpit/telegram] ${methode} : ${corps.slice(0, 300)}`)
-      return false
+      let description = `HTTP ${reponse.status}`
+      try {
+        const d = (JSON.parse(corps) as { description?: unknown }).description
+        if (typeof d === 'string') description = d
+      } catch { /* corps illisible : le statut HTTP suffit */ }
+      return { ok: false, description }
     }
-    return true
+    const json = await reponse.json().catch(() => null) as { result?: unknown } | null
+    return { ok: true, resultat: json?.result ?? null }
   } catch (err) {
     console.error(`[cockpit/telegram] ${methode}`, err)
-    return false
+    return { ok: false, description: 'reseau' }
   }
 }
 
@@ -293,7 +311,8 @@ export type ClicAgentTelegram = {
   id: string
   data?: string
   from?: { id?: number }
-  message?: { chat?: { id?: number }; message_id?: number }
+  /** (21/11) `text` : le texte de la carte cliquee (pour la fermer avec une ligne de fin, cartes-equipe.ts). */
+  message?: { chat?: { id?: number }; message_id?: number; text?: string }
 }
 
 /**
