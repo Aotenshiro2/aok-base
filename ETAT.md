@@ -98,6 +98,28 @@
     alerte et prudence au tour suivant) ; un album de captures ; une liste de noms avec prenom seul ; « traité » apres une
     image ; le JSON de la fenetre du Cockpit (ni traces ni lu ni annexe, le tableau dans reply) ; une question ordinaire ;
     une liste de 250 a 300 emails (decoupee en appels de 150).
+- Troisieme relecture (21/11, corrections commitees NON poussees) :
+  - B1 : texte lu suspect = prudence et alerte DANS le tour seulement ; son corps n'est plus garde (composerLu : en-tete
+    et « (texte suspect retiré : renvoie la capture si besoin) »), rien d'hostile n'est rejoue, donc plus de prudence
+    persistante (historiquePorteLuSuspect, CONSIGNE_LU_SUSPECT et MARQUE_LU_SUSPECT supprimes). Le texte lu passe par
+    analyserTexteLu (injection-pur.ts) : le niveau 'injection' filtre, motifs partages inchanges ; changement de role,
+    « [admin|system|serveur] », « du serveur », « system message » et « ## Instructions » seuls ne suffisent plus, il
+    faut un ordre explicite (ignorer/oublier instructions, consignes, regles precedentes ; act as, mode developpeur,
+    jailbreak ; balises de modele ; reveler ses instructions) ou deux signaux faibles distincts.
+  - A1 : la fenetre (AgentCockpit.tsx) vit dans le depot du workspace : REPLI cote serveur, la route coupe la reponse
+    renvoyee au titre du tableau (sansTableauListe) avant derniereReponse et avant le modele. Le tableau reste colle a
+    reply dans le JSON. A faire un jour cote fenetre : un champ annexe separe, jamais renvoye dans messages.
+  - A2 : tableau plafonne a 12 000 caracteres par tour, tous appels compris (MAX_TABLEAU), puis « N lignes de plus :
+    demande la suite » ; tableau_joint dit au modele le a_partir_de (nouveau parametre de l'outil). Decompte sur tous.
+  - A3 : propre() rend visibles les caracteres caches, change les crochets en parentheses, casse URL, domaines et
+    /commandes ; nomAffiche() casse en plus le « @ » d'un nom affiche ou d'un nom de fiche ; les @pseudo du compte restent
+    cliquables ; les envois qui portent un tableau partent avec link_preview_options is_disabled.
+  - Mineurs : trouveParFragment n'accepte que les pseudos observes (pseudo Telegram, registre, auteur de messages) ;
+    « 1 ligne » ; commentaire de neutraliserLu ; verifier-agent-equipe controle les deux cartes et l'historique sans tableau.
+  - Verif : verifier-rapprochement-liste (31 blocs), verifier-agent-outils-cockpit, verifier-securite-bots,
+    verifier-frictions-melanie, verifier-agent-equipe, verifier-cartes-equipe, verifier-suivi-lots : verts ; tsc et eslint
+    (fichiers touches) : verts. A tester en vrai : une capture ordinaire (« Vous êtes maintenant membre ») puis un tour
+    suivant avec carte ; une liste de 300 emails et « la suite » ; un nom affiche avec URL ou @.
 - Pas fait : import du nom affiche saisi au paiement (champ Stripe nomtelegram) : changement propose dans le rapport, a
   decider (push_membres_supabase.py et une colonne cockpit_membres.telegram_nom).
 
