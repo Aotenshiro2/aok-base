@@ -230,6 +230,9 @@ export async function POST(req: NextRequest) {
   // dans SON fil Telegram, apres cette reponse (after : la fenetre n'attend pas).
   const relances = reponse.relances ?? []
   delete reponse.relances
+  // (21/11) La trace des outils et le texte lu restent au serveur : jamais dans le JSON de la fenetre.
+  delete reponse.traces
+  delete reponse.lu
   if (relances.length) {
     after(async () => {
       for (const r of relances) {

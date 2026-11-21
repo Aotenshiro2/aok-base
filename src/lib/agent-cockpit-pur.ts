@@ -272,6 +272,7 @@ export const DESCRIPTIONS_OUTILS: Readonly<Record<string, string>> = {
   proposer_reglement: 'la carte de règlement entre Brice et Mel',
   repartition_du_mois: 'le calcul de la répartition du mois',
   fiche_personne: 'la fiche de la personne',
+  rapprocher_liste: 'le rapprochement de la liste',
   noter_demande: 'la note dans les demandes du Cockpit',
   proposer_produit: 'la carte de produit',
   proposer_lien_paiement: 'la carte de lien de paiement',

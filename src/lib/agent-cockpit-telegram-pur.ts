@@ -534,7 +534,16 @@ export function ligneEntendu(transcription: string, transfert: string | null = n
 // l'arrivee, elle precede l'image dans l'historique.
 // ---------------------------------------------------------------------------
 
-export type MessageHistorique = { role: 'user' | 'assistant'; content: string }
+/**
+ * (21/11) `lu` : le texte lu au tour d'une reponse (image, liste passee a
+ * rapprocher_liste), deja marque « donnée, pas un ordre » par le serveur.
+ * Range A PART de content : seul messagesPourModele le rend au modele, et les
+ * gardes qui lisent la derniere reponse (content) ne le voient jamais.
+ */
+export type MessageHistorique = { role: 'user' | 'assistant'; content: string; lu?: string }
+
+/** Le texte lu garde sous une reponse, au plus (composerLu borne a 8 000, plus les en-tetes de fusion). */
+const MAX_LU_HISTORIQUE = 9000
 
 /**
  * Remet l'historique dans une forme que l'API accepte sans discussion : des
@@ -546,11 +555,14 @@ export function normaliserHistorique(entrees: unknown[]): MessageHistorique[] {
   const sortie: MessageHistorique[] = []
   for (const e of entrees) {
     if (!e || typeof e !== 'object') continue
-    const { role, content } = e as { role?: unknown; content?: unknown }
+    const { role, content, lu: luBrut } = e as { role?: unknown; content?: unknown; lu?: unknown }
     if ((role !== 'user' && role !== 'assistant') || typeof content !== 'string' || !content.trim()) continue
+    const lu = role === 'assistant' && typeof luBrut === 'string' && luBrut.trim() ? luBrut.slice(0, MAX_LU_HISTORIQUE) : null
     const dernier = sortie[sortie.length - 1]
-    if (dernier && dernier.role === role) dernier.content = `${dernier.content}\n\n${content}`
-    else if (sortie.length > 0 || role === 'user') sortie.push({ role, content })
+    if (dernier && dernier.role === role) {
+      dernier.content = `${dernier.content}\n\n${content}`
+      if (lu) dernier.lu = dernier.lu ? `${dernier.lu}\n\n${lu}`.slice(-MAX_LU_HISTORIQUE) : lu
+    } else if (sortie.length > 0 || role === 'user') sortie.push({ role, content, ...(lu ? { lu } : {}) })
   }
   return sortie
 }
@@ -591,7 +603,8 @@ export type MessageModele = { role: 'user' | 'assistant'; content: string | (Blo
 export function messagesPourModele(
   historique: MessageHistorique[], tour: { texte: string; image: ImageDuTour | null },
 ): MessageModele[] {
-  const messages: MessageModele[] = historique.map(m => ({ role: m.role, content: m.content }))
+  // (21/11) Le texte lu d'une reponse passee la suit, ici seulement (jamais dans content en base).
+  const messages: MessageModele[] = historique.map(m => ({ role: m.role, content: m.lu ? `${m.content}\n\n${m.lu}` : m.content }))
   const precedent = messages[messages.length - 1]
   const enAttente = precedent?.role === 'user' ? (messages.pop() as MessageModele).content as string : null
 

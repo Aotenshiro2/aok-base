@@ -390,7 +390,8 @@ bloc('le code branche la securite : prompts, outils, verrous, gardes', () => {
   // (mesure du 29/10) Nos propres lignes « [système] » (historique d'Agent AOK) ne passent jamais au niveau
   // 'injection' : le tour analyse ses parts ('cache' / 'tiers'), une reprise rien, les resultats d'outils en 'cache'.
   assert.match(tg, /const parts = e\.reprise \? \{ titulaire: '', transmis: '' \} : partsDuTour\(texte\)/)
-  assert.deepEqual([...agent.matchAll(/analyserTexte\([^)]*niveau: '(\w+)'/g)].map(m => m[1]), ['cache'])
+  // (21/11) + le texte lu d'un tour (image, liste passee a rapprocher_liste), au meme niveau 'cache'.
+  assert.deepEqual([...agent.matchAll(/analyserTexte\([^)]*niveau: '(\w+)'/g)].map(m => m[1]), ['cache', 'cache'])
   const historique = JSON.stringify([...T.entreesQuestionEquipe({ id: 'a1', par: 'Brice', parChat: 1, texte: 'Pulse ?', le: '2026-10-29T10:00:00Z' }),
     { role: 'user', content: "[système] Résumé du matin du Live Club, envoyé automatiquement par Agent AOK (ce n'est pas une question de l'équipe)." }])
   assert.equal(S.analyserTexte(historique, { niveau: 'cache' }).suspect, false)
