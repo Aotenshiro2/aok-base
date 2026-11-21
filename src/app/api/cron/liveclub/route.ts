@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { timingSafeEqual } from 'node:crypto'
 import { passageQuotidien } from '@/lib/liveclub/passage'
+import { veilleBunny } from '@/lib/veille-bunny'
 
 /**
  * GET /api/cron/liveclub : le passage quotidien du Live Club (29/09), lance
@@ -38,7 +39,9 @@ export async function GET(req: NextRequest) {
   if (!autorise(req)) return NextResponse.json({ ok: false, erreur: 'Unauthorized' }, { status: 401 })
   try {
     const synthese = await passageQuotidien()
-    return NextResponse.json(synthese)
+    // (21/11) La veille Bunny : solde prepaye sous le seuil = message a l'equipe par Agent AOK.
+    const bunny = await veilleBunny().catch(() => ({ lu: false, alerte: false, livres: 0 }))
+    return NextResponse.json({ ...synthese, bunny })
   } catch (err) {
     // Filet : passageQuotidien rend ses erreurs dans la synthese.
     console.error(`[cron/liveclub] passage interrompu : ${(err instanceof Error ? err.message : String(err)).split('\n')[0].slice(0, 200)}`)

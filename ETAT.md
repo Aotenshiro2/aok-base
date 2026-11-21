@@ -1,5 +1,18 @@
 # ETAT du journal d etudes
 
+## VEILLE BUNNY : SOLDE PREPAYE BAS = MESSAGE A L'EQUIPE PAR AGENT AOK (21/11/2026, commite NON pousse, branche bunny-conso ; migration 20261121100000 ECRITE, NON appliquee, dans le workspace)
+
+- Pourquoi : le compte bunny.net (videos et PDF de l'academie) est prepaye ; a zero il est suspendu et les videos
+  s'arretent. Le 21/11 : 1,44 $ de solde, environ 4 jours d'avance, rien ne le suivait.
+- Collecte : D:\6_Societe\Pilotage\Data-Performance\automations\collect_bunny.py (tache AOK-Collecte-Bunny 07:40,
+  script creer_tache_bunny.ps1 PAS enregistre) ecrit un releve par jour dans cockpit_bunny_releves (migration
+  sites/Aoknowledgecom/supabase/migrations/20261121100000_cockpit_bunny_releves.sql, branche bunny-conso du workspace).
+- Ici : src/lib/veille-bunny.ts (+ -pur.ts), appelee par GET /api/cron/liveclub APRES passageQuotidien (synthese.bunny
+  { lu, alerte, livres }). Dernier releve en alerte, solde connu et collecte de moins de 30 h : alerterEquipeTexte
+  (comptes diffusion = 'equipe'). Une fois par passage, donc une fois par jour tant que le solde reste bas. Table
+  absente : log court, rien d'autre. scripts/verifier-veille-bunny.mjs.
+- Avant mise en ligne : appliquer la migration (sinon la veille ne lit rien, sans casser le cron), puis pousser.
+
 ## CARTES A BOUTONS ENVOYEES A PLUSIEURS COMPTES : FERMEES CHEZ TOUT LE MONDE APRES LA DECISION (21/11/2026, commite NON pousse, branche cartes-equipe ; aucune migration)
 
 - Cause : la carte « Lots à vérifier » partait a chaque compte de l'equipe ; Mel repond « Oui », Brice garde la carte
