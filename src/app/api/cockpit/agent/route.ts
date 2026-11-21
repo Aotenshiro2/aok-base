@@ -6,6 +6,7 @@ import { corsHeaders, corsPreflight } from '@/lib/support-cors'
 import { boucleAgent } from '@/lib/agent-cockpit'
 import { auteurDemande } from '@/lib/agent-cockpit-pur'
 import { limiteDuTour } from '@/lib/agent-cockpit-telegram-pur'
+import { sansTableauListe } from '@/lib/rapprochement-liste-pur'
 import { executerRelanceEquipe } from '@/lib/agent-cockpit-telegram'
 import { analyserTexte, combinerAnalyses, rendreVisible, type Analyse } from '@/lib/securite/injection-pur'
 import { alerterBriceSecurite } from '@/lib/securite/alerte'
@@ -130,7 +131,10 @@ export async function POST(req: NextRequest) {
   const historique: Anthropic.MessageParam[] = []
   for (const m of brut.slice(-MAX_HISTORY)) {
     if (m?.role !== 'user' && m?.role !== 'assistant') continue
-    const texte = typeof m.content === 'string' ? m.content.slice(0, MAX_MESSAGE_LEN).trim() : ''
+    const brutTexte = typeof m.content === 'string' ? m.content.slice(0, MAX_MESSAGE_LEN).trim() : ''
+    // (21/11, troisieme relecture, A1) La fenetre (depot du workspace, AgentCockpit.tsx) renvoie la reponse avec
+    // le tableau de rapprocher_liste colle : coupe au titre du tableau, avant derniereReponse et avant le modele.
+    const texte = m.role === 'assistant' ? sansTableauListe(brutTexte) : brutTexte
     const pieces =
       m.role === 'user' && Array.isArray(m.pieces)
         ? (m.pieces as PieceEntrante[])

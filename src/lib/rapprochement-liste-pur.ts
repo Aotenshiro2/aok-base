@@ -12,6 +12,7 @@
 // Verifie par scripts/verifier-rapprochement-liste.mjs.
 
 import type { Groupe, LienLu } from './fiche-personne-pur'
+import { rendreVisible } from '@/lib/securite/injection-pur'
 
 /** 300 personnes au plus par appel. */
 export const MAX_LISTE = 300
@@ -36,12 +37,20 @@ export const NOTE_POPULATION = "Population calculée sur les abonnements Live Cl
 export const PLAFOND_POPULATION = 150
 
 export type EntreeListe =
-  | { genre: 'liste'; personnes: string[]; doublons: number }
-  | { genre: 'population'; population: Population; page: number }
+  | { genre: 'liste'; personnes: string[]; doublons: number; aPartirDe?: number }
+  | { genre: 'population'; population: Population; page: number; aPartirDe?: number }
+
+/** (21/11, troisieme relecture, A2) La ligne du tableau a partir de laquelle joindre le detail (1 par defaut). */
+function lireAPartirDe(v: unknown): number {
+  if (typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 100_000) return v
+  if (typeof v === 'string' && /^\d{1,5}$/.test(v.trim()) && Number(v) >= 1) return Number(v)
+  return 1
+}
 
 /** Les entrees : une liste (tableau, ou texte coupe aux retours, virgules et points-virgules), ou une population nommee. */
 export function lireEntreeListe(entree: unknown): EntreeListe | { erreur: string } {
-  const o = entree && typeof entree === 'object' ? entree as { personnes?: unknown; population?: unknown; page?: unknown } : {}
+  const o = entree && typeof entree === 'object' ? entree as { personnes?: unknown; population?: unknown; page?: unknown; a_partir_de?: unknown } : {}
+  const aPartirDe = lireAPartirDe(o.a_partir_de)
   const pop = typeof o.population === 'string' ? o.population.trim() : ''
   // (21/11, seconde relecture) Les deux a la fois : une erreur claire, jamais la population en silence.
   const avecPersonnes = Array.isArray(o.personnes) ? o.personnes.length > 0 : typeof o.personnes === 'string' && !!o.personnes.trim()
@@ -49,7 +58,7 @@ export function lireEntreeListe(entree: unknown): EntreeListe | { erreur: string
   if (pop) {
     if (!(pop in POPULATIONS)) return { erreur: `population inconnue : ${Object.keys(POPULATIONS).join(' ou ')}.` }
     const page = typeof o.page === 'number' && Number.isInteger(o.page) && o.page >= 1 ? o.page : typeof o.page === 'string' && /^\d{1,3}$/.test(o.page) && Number(o.page) >= 1 ? Number(o.page) : 1
-    return { genre: 'population', population: pop as Population, page }
+    return { genre: 'population', population: pop as Population, page, ...(aPartirDe > 1 ? { aPartirDe } : {}) }
   }
   const brutes = Array.isArray(o.personnes) ? o.personnes : typeof o.personnes === 'string' ? o.personnes.split(/[\n;,]+/) : null
   if (!brutes) return { erreur: 'personnes (une liste d\'emails ou de noms) ou population manquante.' }
@@ -69,7 +78,7 @@ export function lireEntreeListe(entree: unknown): EntreeListe | { erreur: string
   }
   if (personnes.length === 0) return { erreur: 'liste vide.' }
   if (personnes.length > MAX_LISTE) return { erreur: `${personnes.length} personnes : ${MAX_LISTE} au plus par appel, découpe la liste.` }
-  return { genre: 'liste', personnes, doublons }
+  return { genre: 'liste', personnes, doublons, ...(aPartirDe > 1 ? { aPartirDe } : {}) }
 }
 
 // ---------------------------------------------------------------------------
@@ -164,7 +173,10 @@ export function comptesDuGroupe(g: Pick<Groupe, 'noeuds' | 'touches' | 'certains
 export function trouveParFragment(qui: { genre: string; brut?: string }, touches: Pick<Groupe['touches'][number], 'champ' | 'valeur' | 'exact'>[]): boolean {
   if (qui.genre !== 'texte') return false
   const unMot = !/\s/.test((qui.brut ?? '').trim())
-  const estPseudo = (t: { champ: string; valeur: string | null }) => /pseudo/.test(t.champ) || (t.valeur ?? '').startsWith('@')
+  // (21/11, troisieme relecture) Un pseudo OBSERVE seulement : celui du compte Telegram, du registre du groupe ou
+  // d'un auteur de messages (fiche-personne.ts, chercherTexte). Pas le pseudo declare au paiement ni celui pose a la main.
+  const estPseudo = (t: { champ: string; valeur: string | null }) => t.champ === 'pseudo Telegram'
+    || ((t.champ === 'registre du groupe' || t.champ === 'auteur de messages') && (t.valeur ?? '').startsWith('@'))
   return !touches.some((t) => t.exact && (!unMot || estPseudo(t)))
 }
 
@@ -269,13 +281,35 @@ export type LignePersonne = {
   note?: string
 }
 
-/** Un texte choisi par une personne (nom affiche, pseudo, nom de fiche) : borne, sans « | » ni retour a la ligne. */
+// (21/11, troisieme relecture, A3) Une URL ou un domaine (« https://x.example/y », « t.me/joinchat/abc »,
+// « evil.example ») : jamais dans une adresse email (ni juste avant, ni juste apres un « @ »).
+const SCHEMA_URL = /\b(https?|ftp|tg|mailto):\/\//gi
+const DOMAINE = /(?<![@\p{L}\p{N}._-])(?![\p{L}\p{N}._-]*@)[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*\.\p{L}{2,}(?![\p{L}\p{N}_-])/gu
+// Une /commande Telegram (« /reset ») en debut de mot.
+const COMMANDE = /(^|[\s(«"'])\/(?=[\p{L}\p{N}_])/gu
+
+/**
+ * Un texte choisi par une personne (nom affiche, pseudo, nom de fiche), ou l'entree telle que donnee, pour
+ * un texte ENVOYE a l'equipe : borne, sans « | » ni retour a la ligne ; (21/11, troisieme relecture, A3) les
+ * caracteres caches rendus visibles (rendreVisible), les crochets changes en parentheses (comme
+ * neutraliserLu), les URL, domaines et /commandes casses pour ne plus etre cliquables (« x(.)example »,
+ * « https(:)// », « / reset »). Les emails restent entiers ; un « @ » n'est casse que dans un nom affiche (nomAffiche).
+ */
 export function propre(s: string | null | undefined, max = 80): string {
-  const t = Array.from(String(s ?? ''), (ch) => {
+  const t = Array.from(rendreVisible(String(s ?? '')), (ch) => {
     const c = ch.charCodeAt(0)
-    return c < 32 || c === 127 || ch === '|' || ch === ' ' || ch === ' ' ? ' ' : ch
-  }).join('').replace(/\s+/g, ' ').trim()
+    return c < 32 || c === 127 || ch === '|' || ch === '\u2028' || ch === '\u2029' ? ' ' : ch
+  }).join('')
+    .replace(/[[【［〔]/g, '(').replace(/[\]】］〕]/g, ')')
+    .replace(SCHEMA_URL, '$1(:)//')
+    .replace(DOMAINE, (d) => d.replace(/\./g, '(.)'))
+    .replace(COMMANDE, '$1/ ')
+    .replace(/\s+/g, ' ').trim()
   return t.length > max ? `${t.slice(0, max - 1)}…` : t
+}
+/** Un nom AFFICHE (Telegram, fiche) : propre, et un « @ » qui n'y est pas un pseudo du compte ne reste pas cliquable. */
+export function nomAffiche(s: string | null | undefined, max = 80): string {
+  return propre(s, max).replace(/@/g, '(at)')
 }
 const pseudoPropre = (p: string) => propre(p.replace(/^@+/, '').replace(/[^A-Za-z0-9_]/g, ''), 40)
 
@@ -283,7 +317,7 @@ const pseudoPropre = (p: string) => propre(p.replace(/^@+/, '').replace(/[^A-Za-
 export function nomTelegram(c: CompteLu | undefined): string | null {
   if (!c) return null
   if (c.pseudo && pseudoPropre(c.pseudo)) return `@${pseudoPropre(c.pseudo)}`
-  if (c.nom && propre(c.nom, 64)) return `« ${propre(c.nom, 64)} » (sans @pseudo)`
+  if (c.nom && nomAffiche(c.nom, 64)) return `« ${nomAffiche(c.nom, 64)} » (sans @pseudo)`
   return null
 }
 
@@ -301,7 +335,7 @@ export const MAX_CANDIDATS_MONTRES = 3
 
 export function lignePersonne(f: FaitsPersonne, comptes: Map<number, CompteLu>): LignePersonne {
   const entree = f.entree ? propre(f.entree, MAX_ENTREE + 1) : null
-  const fiche = f.fiche ? propre(f.fiche, 80) : null
+  const fiche = f.fiche ? nomAffiche(f.fiche, 80) : null
   const base = {
     personne: entree && fiche ? `${entree} (${fiche})` : fiche ?? entree ?? '?',
     ...(f.cle ? { cle: f.cle } : {}),
@@ -422,7 +456,7 @@ function libelle(l: LignePersonne): string {
  */
 export function reponseListe(
   lignes: LignePersonne[],
-  o: { quoi: string; doublons?: number; budget?: number; page?: PageLue; notePopulation?: string; nomsNonLus?: boolean },
+  o: { quoi: string; doublons?: number; budget?: number; page?: PageLue; notePopulation?: string; nomsNonLus?: boolean; aPartirDe?: number; budgetTableau?: number },
 ): { texte: string; lignesRendues: number; tableau: string } {
   const budget = o.budget ?? BUDGET_LISTE
   const d = decompter(lignes)
@@ -471,8 +505,13 @@ export function reponseListe(
     ].join(' | ')
     return t.length > MAX_LIGNE ? `${t.slice(0, MAX_LIGNE - 1)}…` : t
   })
+  // (21/11, troisieme relecture, A2) Le tableau joint, plafonne ; la note dit au modele comment obtenir la suite.
+  const tableau = tableauListe(o.quoi, lignesTexte, o.page, { aPartirDe: o.aPartirDe, budget: o.budgetTableau })
+  const tableauJoint = tableau.suivante
+    ? `Le tableau joint à ta réponse est coupé (${MAX_TABLEAU} caractères par tour) : ${tableau.derniere >= tableau.premiere ? `lignes ${tableau.premiere} à ${tableau.derniere}` : 'aucune ligne'} sur ${tableau.total}. Si on te demande la suite : relance rapprocher_liste avec les MÊMES personnes${o.page ? ' (même population, même page)' : ''} et a_partir_de: ${tableau.suivante}.`
+    : tableau.premiere > 1 ? `Lignes ${tableau.premiere} à ${tableau.total} jointes : c'est la fin du tableau.` : 'Toutes les lignes sont jointes.'
   const gardees: string[] = []
-  let taille = JSON.stringify(tete).length + 300
+  let taille = JSON.stringify(tete).length + JSON.stringify(tableauJoint).length + 320
   for (const t of lignesTexte) {
     if (taille + t.length + 4 > budget) break
     gardees.push(t)
@@ -481,19 +520,50 @@ export function reponseListe(
   const coupees = lignesTexte.length - gardees.length
   const texte = JSON.stringify({
     ...tete,
+    tableau_joint: tableauJoint,
     colonnes: 'personne | nom Telegram | groupe | voie | confiance | indices',
     personnes: gardees,
     ...(coupees ? { lignes_coupees: `${coupees} lignes coupées (la borne) : les dernières du classement. Relance avec ces personnes seules pour les voir.` } : {}),
   })
-  return { texte, lignesRendues: gardees.length, tableau: tableauListe(o.quoi, lignesTexte, o.page) }
+  return { texte, lignesRendues: gardees.length, tableau: tableau.texte }
 }
 
 /**
  * (21/11, seconde relecture, C4) Le tableau des lignes, COMPOSE PAR LE SERVEUR et joint a la reponse
  * envoyee a l'equipe (ReponseAgent.annexe) : le modele n'ecrit que la phrase et son commentaire, la
- * reponse ne depend plus de max_tokens. Toutes les lignes (Telegram la coupe en plusieurs messages).
+ * reponse ne depend plus de max_tokens. (21/11, troisieme relecture, A2) Plafonne a `budget` caracteres
+ * (MAX_TABLEAU par tour, le reste du tour pour un second appel) : au-dela, une ligne « N lignes de plus :
+ * demande la suite », et `suivante` dit le a_partir_de qui la donne.
  */
-export function tableauListe(quoi: string, lignesTexte: string[], page?: PageLue): string {
-  const titre = `Le détail, ${lignesTexte.length} lignes (${propre(quoi, 120)}${page ? `, page ${page.page} sur ${page.pages}` : ''}) :`
-  return [titre, 'personne | nom Telegram | groupe | voie | confiance | indices', ...lignesTexte].join('\n')
+export const MAX_TABLEAU = 12_000
+export type TableauListe = { texte: string; total: number; premiere: number; derniere: number; suivante: number | null }
+const COLONNES_TABLEAU = 'personne | nom Telegram | groupe | voie | confiance | indices'
+export function tableauListe(quoi: string, lignesTexte: string[], page?: PageLue, o: { aPartirDe?: number; budget?: number } = {}): TableauListe {
+  const total = lignesTexte.length
+  const premiere = Math.min(Math.max(1, Math.floor(o.aPartirDe ?? 1)), Math.max(1, total))
+  const budget = Math.max(0, o.budget ?? MAX_TABLEAU)
+  const pluriel = (n: number) => (n > 1 ? 's' : '')
+  const titre = (derniere: number) => `Le détail, ${total} ligne${pluriel(total)}${derniere >= premiere && (premiere > 1 || derniere < total) ? `, lignes ${premiere} à ${derniere}` : ''} (${propre(quoi, 120)}${page ? `, page ${page.page} sur ${page.pages}` : ''}) :`
+  // Le titre, les colonnes et la ligne de suite tiennent dans le budget.
+  let taille = titre(total).length + 30 + COLONNES_TABLEAU.length + 60
+  const gardees: string[] = []
+  for (const t of lignesTexte.slice(premiere - 1)) {
+    if (taille + t.length + 1 > budget) break
+    gardees.push(t)
+    taille += t.length + 1
+  }
+  const derniere = premiere - 1 + gardees.length
+  const reste = total - derniere
+  const texte = [titre(derniere), COLONNES_TABLEAU, ...gardees, ...(reste > 0 ? [`${reste} ligne${pluriel(reste)} de plus : demande la suite.`] : [])].join('\n')
+  return { texte, total, premiere, derniere, suivante: reste > 0 ? derniere + 1 : null }
+}
+
+/**
+ * (21/11, troisieme relecture, A1) Une reponse de l'agent SANS le tableau joint (titre de tableauListe et
+ * tout ce qui suit) : la fenetre du cockpit renvoie l'historique avec le tableau colle a la reponse, et ses
+ * noms affiches (choisis par les personnes) ne doivent ni revenir au modele ni nourrir les gardes du serveur.
+ */
+export function sansTableauListe(texte: string): string {
+  const i = texte.search(/(^|\n)Le détail, \d+ lignes?[ ,]/)
+  return i < 0 ? texte : texte.slice(0, i).trimEnd()
 }

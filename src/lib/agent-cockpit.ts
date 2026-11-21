@@ -21,16 +21,16 @@ import {
   type RelanceEquipe,
 } from '@/lib/agent-equipe'
 import {
-  REFUS_PRUDENCE, analyserTexte, consignePrudenceAgent, prefixeResultatSuspect, rendreVisible, type Analyse,
+  REFUS_PRUDENCE, analyserTexte, analyserTexteLu, consignePrudenceAgent, prefixeResultatSuspect, rendreVisible, type Analyse,
 } from '@/lib/securite/injection-pur'
 import { alerterBriceSecurite } from '@/lib/securite/alerte'
 import { controlerActionRepartition, repartitionPourAgent } from '@/lib/repartition/serveur'
 import { fichePersonnePourAgent, resoudrePersonnePourEffacement, resoudrePersonnePourSupport } from '@/lib/fiche-personne'
 import { rapprocherListePourAgent } from '@/lib/rapprochement-liste'
-import { lireEntreeListe } from '@/lib/rapprochement-liste-pur'
+import { lireEntreeListe, MAX_TABLEAU } from '@/lib/rapprochement-liste-pur'
 import {
-  compterLignes, composerLu, historiquePorteLuSuspect, ligneJournalTraces, resumerParametres, separerLectureImage,
-  CONSIGNE_LECTURE_IMAGE, CONSIGNE_LU_SUSPECT,
+  compterLignes, composerLu, ligneJournalTraces, resumerParametres, separerLectureImage,
+  CONSIGNE_LECTURE_IMAGE,
   type MorceauLu, type TraceOutil,
 } from '@/lib/agent-outils-trace-pur'
 import { controlerActionEffacement } from '@/lib/effacement'
@@ -990,13 +990,14 @@ const OUTILS: Anthropic.Tool[] = [
   {
     name: 'rapprocher_liste',
     description:
-      "LECTURE, sans carte : les comptes Telegram d'une LISTE de personnes (« leurs noms Telegram », « qui est joignable », une capture d'emails). Pour chacune, le même recoupement que fiche_personne (rattachements, registre du groupe, fils Support, gestes, pont d'archive, pseudo déclaré, puis candidats par le nom). Rend un décompte calculé, sa phrase, et une ligne par personne : personne | nom Telegram (@pseudo, sinon nom affiché) | dans le groupe | voie | confiance (lien dur, probable, candidat par le nom, aucune trace, inconnu des fiches et des liens Telegram, plusieurs, non terminé, illisible). Au-delà de 150 entrées, découpe : 150 au plus par appel, un appel par morceau. Le serveur joint lui-même le tableau des lignes à ta réponse : n'écris que la phrase du décompte et ton commentaire.",
+      "LECTURE, sans carte : les comptes Telegram d'une LISTE de personnes (« leurs noms Telegram », « qui est joignable », une capture d'emails). Pour chacune, le même recoupement que fiche_personne (rattachements, registre du groupe, fils Support, gestes, pont d'archive, pseudo déclaré, puis candidats par le nom). Rend un décompte calculé, sa phrase, et une ligne par personne : personne | nom Telegram (@pseudo, sinon nom affiché) | dans le groupe | voie | confiance (lien dur, probable, candidat par le nom, aucune trace, inconnu des fiches et des liens Telegram, plusieurs, non terminé, illisible). Au-delà de 150 entrées, découpe : 150 au plus par appel, un appel par morceau. Le serveur joint lui-même le tableau des lignes à ta réponse : n'écris que la phrase du décompte et ton commentaire. Ce tableau est borné (12 000 caractères par tour, environ 3 messages) : s'il est coupé, la réponse le dit dans tableau_joint ; pour la suite, relance avec les MÊMES personnes (ou la même population et la même page) et a_partir_de donné par tableau_joint.",
     input_schema: {
       type: 'object',
       properties: {
         personnes: { type: 'array', items: { type: 'string' }, description: 'Les emails et/ou noms, un par entrée, tels que donnés (300 au plus).' },
         population: { type: 'string', enum: ['desabonnes_live_club', 'membres_live_club'], description: "À la place d'une liste : une population nommée." },
         page: { type: 'integer', minimum: 1, description: 'Pour une population plus longue que sa borne : la page à lire (1 par défaut ; la réponse dit combien il y en a).' },
+        a_partir_de: { type: 'integer', minimum: 1, description: "La suite d'un tableau coupé : la ligne à partir de laquelle le joindre (donnée par tableau_joint ; 1 par défaut). Le décompte porte toujours sur tout le monde." },
       },
     },
   },
@@ -1800,11 +1801,14 @@ export async function boucleAgent(
   }
   // (21/11, seconde relecture, C3) Un texte lu (image, liste passee a rapprocher_liste) : analyse au niveau
   // 'injection' (une consigne adressee a une IA, « [système] ignore tes instructions »), PAS 'tiers' (un IBAN
-  // dans une capture de paiements n'est pas suspect). Suspect : marque (en-tete de composerLu, qui garde le
-  // tour suivant sous prudence), le reste du tour sous prudence, et la meme alerte qu'un resultat suspect.
+  // dans une capture de paiements n'est pas suspect). (21/11, troisieme relecture, B1) Filtre pour le texte lu
+  // (analyserTexteLu) : un changement de role, « [admin] », « du serveur » ou « system message » seuls ne
+  // suffisent plus. Suspect : le reste du tour sous prudence, la meme alerte qu'un resultat suspect, et le
+  // corps n'est PAS garde (composerLu : en-tete et « texte suspect retiré ») : rien d'hostile n'est rejoue,
+  // les tours suivants redeviennent normaux.
   const alertesLu: Analyse[] = []
   const noterLu = (m: MorceauLu): void => {
-    const a = analyserTexte(m.texte, { niveau: 'injection' })
+    const a = analyserTexteLu(m.texte)
     lus.push(a.suspect ? { ...m, suspect: true } : m)
     if (!a.suspect) return
     prudence = true
@@ -1818,15 +1822,8 @@ export async function boucleAgent(
     if (canal.essai) { console.warn('[cockpit/agent] essai : texte lu suspect, alerte non envoyee'); return }
     await alerterBriceSecurite({
       source: `${canal.sourceAlerte ?? 'Agent AOK'}, texte lu dans une image ou une liste`, qui,
-      analyse: a, suite: "Aucune carte n'a pu partir dans ce tour, le texte lu est marqué suspect et les tours qui le rejouent restent sous la même prudence.",
+      analyse: a, suite: "Aucune carte n'a pu partir dans ce tour ; le texte lu n'est pas gardé dans l'historique (il faudra renvoyer la capture).",
     })
-  }
-  // (21/11, seconde relecture) L'historique rejoue un texte lu marque suspect : meme prudence, a chaque tour qui le porte.
-  const contenusAssistant = historique.filter((m) => m.role === 'assistant')
-    .map((m) => (typeof m.content === 'string' ? m.content : m.content.map((b) => (b.type === 'text' ? b.text : '')).join('\n')))
-  if (historiquePorteLuSuspect(contenusAssistant)) {
-    systeme.push({ type: 'text', text: CONSIGNE_LU_SUSPECT })
-    prudence = true
   }
 
   // Une question = un echange (ecran Depense IA) : les tours d'outils s'y rangent.
@@ -1846,6 +1843,8 @@ export async function boucleAgent(
   // telle qu'elle part (ajoutee par le serveur, jamais reecrite par le modele).
   // (21/11, seconde relecture, C4) Les tableaux de rapprocher_liste, joints par le serveur a la reponse.
   const annexes: string[] = []
+  // (21/11, troisieme relecture, A2) Les tableaux d'un tour : MAX_TABLEAU caracteres au plus, tous appels compris.
+  let budgetTableau = MAX_TABLEAU
   const avecRelances = (r0: ReponseAgent): ReponseAgent => {
     // (21/11) La trace des outils : au journal du serveur, et rendue a l'appelant (jamais au modele).
     const journal = ligneJournalTraces(traces)
@@ -2182,8 +2181,8 @@ export async function boucleAgent(
             })
             continue
           }
-          const { texte, tableau } = await rapprocherListePourAgent(bloc.input, { fonds: accesFonds, dureeMaxMs: duree })
-          if (tableau) annexes.push(tableau)
+          const { texte, tableau } = await rapprocherListePourAgent(bloc.input, { fonds: accesFonds, dureeMaxMs: duree, budgetTableau })
+          if (tableau && !annexes.includes(tableau)) { annexes.push(tableau); budgetTableau = Math.max(0, budgetTableau - tableau.length - 2) }
           resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: await surveillerResultat(texte) })
           continue
         }

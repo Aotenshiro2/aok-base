@@ -104,7 +104,16 @@ bloc('le filet du canal : un « Je vérifie » est toujours suivi d une reponse 
   assert.ok(!/text: reponse\.reply \}/.test(src), 'plus de sendMessage brut de la reponse')
   // (21/11, seconde relecture) La reponse part avec le tableau de rapprocher_liste joint par le serveur (envoye).
   assert.match(src, /const envoye = reponse\.annexe \? `\$\{reponse\.reply\}\\n\\n\$\{reponse\.annexe\}` : reponse\.reply/)
-  assert.match(src, /if \(!await envoyerMessages\(chatId, decouperMessage\(envoye\)\)\) await signalerNonPartie/)
+  assert.match(src, /if \(!await envoyerMessages\(chatId, decouperMessage\(envoye\), undefined, apercu\)\) await signalerNonPartie/)
+  // (21/11, troisieme relecture) Les deux reponses a carte partent aussi avec le tableau (envoye), sans apercu de lien.
+  assert.match(src, /envoyerMessages\(chatId, messagesAvecCarte\(envoye, carte\), undefined, apercu\)/)
+  assert.match(src, /envoyerMessages\(chatId, messagesAvecCarte\(envoye, `⚠️ \$\{resume\}`\), boutons, apercu\)/)
+  assert.equal([...src.matchAll(/messagesAvecCarte\(/g)].filter((m) => !/messagesAvecCarte\(envoye, /.test(src.slice(m.index, m.index + 40))).length, 0,
+    'aucune carte envoyee sans le tableau')
+  // L'historique garde la reponse SANS le tableau : content = replyHistorique (reponse.reply par defaut).
+  assert.match(src, /async function livrerReponse\(c: ContexteLivraison, reponse: ReponseAgent, replyHistorique: string = reponse\.reply\)/)
+  assert.match(src, /role: 'assistant',\n\s*content: replyHistorique,/)
+  assert.ok(!/content: envoye/.test(src), "le tableau n'entre jamais dans l'historique")
   for (const t of [TEXTE_TEMPS_DEPASSE, TEXTE_REPONSE_NON_PARTIE, TEXTE_TROP_DE_BROUILLONS, TEXTE_PLUS_LE_TEMPS_BROUILLON]) {
     assert.ok(!HORS_CLAVIER.test(t), t)
   }

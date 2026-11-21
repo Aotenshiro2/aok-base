@@ -586,11 +586,13 @@ const TEXTE_ERREUR_AGENT = 'L’agent n’a pas pu répondre (erreur côté serv
  * entiere dans le dernier message. false = un envoi refuse (la suite n'est
  * pas envoyee).
  */
-async function envoyerMessages(chatId: number, morceaux: string[], boutons?: unknown): Promise<boolean> {
+async function envoyerMessages(chatId: number, morceaux: string[], boutons?: unknown, o: { sansApercu?: boolean } = {}): Promise<boolean> {
   for (const [i, texte] of morceaux.entries()) {
     const dernier = i === morceaux.length - 1
     const ok = await tgCockpit('sendMessage', {
       chat_id: chatId, text: texte, ...(dernier && boutons ? { reply_markup: boutons } : {}),
+      // (21/11, troisieme relecture, A3) Un tableau de noms choisis par les personnes : aucun apercu de lien.
+      ...(o.sansApercu ? { link_preview_options: { is_disabled: true } } : {}),
     })
     if (!ok) return false
   }
@@ -971,6 +973,7 @@ async function livrerReponse(c: ContexteLivraison, reponse: ReponseAgent, replyH
   // (21/11, seconde relecture, C4) Le tableau de rapprocher_liste, compose par le serveur, part avec la reponse
   // (coupee en plusieurs messages par decouperMessage) ; l'historique n'en garde rien (content = replyHistorique).
   const envoye = reponse.annexe ? `${reponse.reply}\n\n${reponse.annexe}` : reponse.reply
+  const apercu = { sansApercu: !!reponse.annexe }
   // La reponse de ce tour, seule (la question est deja en base). Un rejeu
   // Telegram du MEME update s'est arrete a l'ecriture de la question ; la
   // clause where de chaque upsert reste en ceinture. (29/10) Une reponse
@@ -998,7 +1001,7 @@ async function livrerReponse(c: ContexteLivraison, reponse: ReponseAgent, replyH
         where ${garde}`
       const carte = `⚠️ ${resume}\n\n${cle_manquante
         ?? `La clé d'écriture du compte ${action.compte} n'est pas posée : rien ne peut être exécuté.`}`
-      if (!await envoyerMessages(chatId, messagesAvecCarte(envoye, carte))) await signalerNonPartie(chatId)
+      if (!await envoyerMessages(chatId, messagesAvecCarte(envoye, carte), undefined, apercu)) await signalerNonPartie(chatId)
       return
     }
 
@@ -1023,7 +1026,7 @@ async function livrerReponse(c: ContexteLivraison, reponse: ReponseAgent, replyH
         { text: '❌ Annuler', callback_data: `non:${nonce}` },
       ]],
     }
-    if (!await envoyerMessages(chatId, messagesAvecCarte(envoye, `⚠️ ${resume}`), boutons)) await signalerNonPartie(chatId)
+    if (!await envoyerMessages(chatId, messagesAvecCarte(envoye, `⚠️ ${resume}`), boutons, apercu)) await signalerNonPartie(chatId)
     return
   }
 
@@ -1034,5 +1037,5 @@ async function livrerReponse(c: ContexteLivraison, reponse: ReponseAgent, replyH
     set messages = ${HISTORIQUE_UPSERT}, action_en_attente = null, nonce = null,
         dernier_update_id = ${majUpdate}, maj_le = now()
     where ${garde}`
-  if (!await envoyerMessages(chatId, decouperMessage(envoye))) await signalerNonPartie(chatId)
+  if (!await envoyerMessages(chatId, decouperMessage(envoye), undefined, apercu)) await signalerNonPartie(chatId)
 }

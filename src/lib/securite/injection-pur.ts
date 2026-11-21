@@ -468,6 +468,53 @@ export function analyserTexte(texte: unknown, o: { niveau: NiveauAnalyse } = { n
   return { suspect: signaux.some(s => s.fort), signaux }
 }
 
+// ---------------------------------------------------------------------------
+// Le texte LU (21/11, troisieme relecture, B1)
+// ---------------------------------------------------------------------------
+
+// Un ordre explicite : ignorer / oublier les instructions, consignes ou regles precedentes (CONSIGNES_IA[0]),
+// changer de role ou de mode (« act as », « mode développeur », jailbreak : CONSIGNES_IA[3]), les balises de
+// conversation des modeles (CONSIGNES_IA[4]), reveler ses instructions (REVELER). Un seul suffit.
+const REVELER = re(`${G}(r[ée]v[èe]le[rsz]?|r[ée]v[ée]lez|reveal|print|repeat|show\\s+me|affiche[rsz]?|montre[rsz]?|r[ée]p[èe]te[rsz]?)${D}[^\\n.!?]{0,30}?${G}(ton|tes|vos|votre|your|the)\\s+(system\\s*prompt|prompt(\\s+(syst[èe]me|initial|cach[ée]))?|instructions?\\s+(syst[èe]me|initiales?|cach[ée]es?|d'origine)|consignes?\\s+(syst[èe]me|initiales?|cach[ée]es?|d'origine)|(system|initial|hidden|original)\\s+(prompt|instructions?))${D}`)
+const ORDRES_EXPLICITES: RegExp[] = [CONSIGNES_IA[0], CONSIGNES_IA[3], CONSIGNES_IA[4], REVELER]
+// Des signaux qui ne suffisent PAS seuls dans un texte lu (captures ordinaires du 21/11 : « Vous êtes maintenant
+// un membre du Live Club », « message du serveur 500 », « Jean [Admin] : bonjour », « System message: payment
+// succeeded », « ## Instructions » dans une facture) : il en faut deux distincts, ou un ordre explicite.
+const SIGNAUX_FAIBLES_LU: RegExp[] = [CONSIGNES_IA[1], CONSIGNES_IA[2], CONSIGNES_IA[5], FAUX_SYSTEME[0], FAUX_SYSTEME[1]]
+
+/**
+ * L'analyse d'un texte LU par l'agent (bloc lu dans une image, liste passee a rapprocher_liste) : le
+ * niveau 'injection' d'analyserTexte, FILTRE (les motifs partages et les autres appelants ne bougent pas).
+ * Une consigne adressee a une IA n'y est forte que s'il y a un ordre explicite (ORDRES_EXPLICITES) ou deux
+ * signaux faibles distincts (SIGNAUX_FAIBLES_LU). Les caracteres caches, le Base64, le HTML restent tels quels.
+ */
+export function analyserTexteLu(texte: unknown): Analyse {
+  const a = analyserTexte(texte, { niveau: 'injection' })
+  if (!a.signaux.some(s => s.genre === 'consigne_ia' || s.genre === 'faux_systeme')) return a
+  const brut = typeof texte === 'string' ? texte : ''
+  const t = brut.length > 400_000 ? brut.slice(0, 400_000) : brut
+  // Le meme texte qu'analyserTexte : sans les invisibles, plus ce que cachent tags, Base64 et commentaires.
+  const net = Array.from(t).filter(c => {
+    const cp = c.codePointAt(0) as number
+    return !(INVISIBLES.has(cp) || cp === ZWJ || BIDI.has(cp) || estTag(cp))
+  }).join('')
+  const lus = [net, ...a.signaux.map(s => s.decode).filter((d): d is string => !!d)].join('\n')
+  const ordre = premier(lus, ORDRES_EXPLICITES, 'consigne_ia')
+  const faibles = SIGNAUX_FAIBLES_LU
+    .map((r, i) => premier(lus, [r], i < 3 ? 'consigne_ia' : 'faux_systeme'))
+    .filter((s): s is Signal => s !== null)
+  const forts = !!ordre || faibles.length >= 2
+  const filtres: GenreSignal[] = ['consigne_ia', 'faux_systeme', 'deja_valide']
+  const signaux: Signal[] = [
+    ...a.signaux.filter(s => !filtres.includes(s.genre)),
+    ...(ordre ? [ordre] : []),
+    ...faibles.map(s => ({ ...s, fort: forts })),
+  ]
+  const deja = a.signaux.find(s => s.genre === 'deja_valide')
+  if (deja) signaux.push({ ...deja, fort: signaux.some(s => s.fort) || gestesSensibles(lus).length > 0 })
+  return { suspect: signaux.some(s => s.fort), signaux }
+}
+
 /** Deux analyses (le titulaire et ce qu'il transmet, par exemple) en une. */
 export function combinerAnalyses(...analyses: Analyse[]): Analyse {
   const signaux = analyses.flatMap(a => a.signaux)

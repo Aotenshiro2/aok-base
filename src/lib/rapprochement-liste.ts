@@ -149,7 +149,7 @@ const uniques = <T>(l: T[]) => [...new Set(l)]
  * Le rapprochement : la reponse au modele (JSON borne) et le nombre de lignes
  * rendues. Ne leve jamais : une panne revient en JSON, sans donnee.
  */
-export async function rapprocherListePourAgent(entree: unknown, o: { fonds: boolean; dureeMaxMs?: number }): Promise<{ texte: string; lignes: number; tableau?: string }> {
+export async function rapprocherListePourAgent(entree: unknown, o: { fonds: boolean; dureeMaxMs?: number; budgetTableau?: number }): Promise<{ texte: string; lignes: number; tableau?: string }> {
   const lu = lireEntreeListe(entree)
   if ('erreur' in lu) return { texte: JSON.stringify({ statut: 'erreur', erreur: lu.erreur }), lignes: 0 }
   try {
@@ -161,7 +161,7 @@ export async function rapprocherListePourAgent(entree: unknown, o: { fonds: bool
   }
 }
 
-export async function rapprocher(lu: EntreeListe, o: { fonds: boolean; dureeMaxMs?: number }): Promise<{ texte: string; lignes: number; resultats: LignePersonne[]; faits: FaitsPersonne[]; tableau?: string }> {
+export async function rapprocher(lu: EntreeListe, o: { fonds: boolean; dureeMaxMs?: number; budgetTableau?: number }): Promise<{ texte: string; lignes: number; resultats: LignePersonne[]; faits: FaitsPersonne[]; tableau?: string }> {
   const fin = Date.now() + (o.dureeMaxMs ?? DUREE_MAX_MS)
 
   // 0. Les personnes : la liste donnee, ou une page de la population.
@@ -341,7 +341,7 @@ export async function rapprocher(lu: EntreeListe, o: { fonds: boolean; dureeMaxM
     .map((l) => (nomsNonLus && l.telegram ? { ...l, telegram: l.telegram.replace(/\(nom inconnu\)/g, '(nom non lu)') } : l))
   const quoi = lu.genre === 'population' ? POPULATIONS[lu.population] : `liste de ${lu.personnes.length} entrées`
   const { texte, lignesRendues, tableau } = reponseListe(resultats, {
-    quoi, doublons: lu.genre === 'liste' ? lu.doublons : 0, page,
+    quoi, doublons: lu.genre === 'liste' ? lu.doublons : 0, page, aPartirDe: lu.aPartirDe, budgetTableau: o.budgetTableau,
     ...(lu.genre === 'population' ? { notePopulation: NOTE_POPULATION } : {}),
     ...(nomsNonLus ? { nomsNonLus: true } : {}),
   })
