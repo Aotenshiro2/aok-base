@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import type Anthropic from '@anthropic-ai/sdk'
 import { prisma } from '@/lib/db'
 import { boucleAgent, type ReponseAgent } from '@/lib/agent-cockpit'
+import type { TraceOutil } from '@/lib/agent-outils-trace-pur'
 import { auteurDemande, libelleBoutonConfirmer, messageRenvoye } from '@/lib/agent-cockpit-pur'
 import { validerAction, executerAction, RefusAction, expurgerLiensInvitation, paramsPourLog } from '@/lib/stripe-actions'
 import {
@@ -53,6 +54,9 @@ import { lireBoutonProposition } from '@/lib/tab/repondre-pur'
 // du bot QUI a recu le message (un file_id ne vaut que pour son bot), et part
 // au modele en bloc image dans le tour courant SEULEMENT. L'historique n'en
 // garde que la trace « [image envoyée] » et la legende, jamais le base64.
+// (21/11, cas de Melanie) Plus, A PART sur la ligne de la reponse (champ lu),
+// le texte que l'agent y a lu ou la liste passee a rapprocher_liste
+// (ReponseAgent.lu, borne) : la relance porte sur la meme liste.
 //
 // VOCAUX (Brice, 31/10) : un message vocal ou un fichier audio est transcrit
 // (transcrireVocalTelegram, Groq) puis traite comme un message ECRIT de la
@@ -197,6 +201,10 @@ type MessageStocke = {
   questionEquipe?: QuestionEquipe
   /** (29/10) La question d'equipe que cette ligne ferme (reponse rapportee). */
   rapportQuestion?: string
+  /** (21/11) La trace des appels d'outils du tour (jamais relue par le modele : messagesPourModele ne garde que role et content). */
+  outils?: TraceOutil[]
+  /** (21/11) Le texte lu au tour (composerLu) : rendu au modele par messagesPourModele seulement, jamais dans content ni dans derniereReponse. */
+  lu?: string
 }
 
 type LigneConversation = {
@@ -578,11 +586,13 @@ const TEXTE_ERREUR_AGENT = 'L’agent n’a pas pu répondre (erreur côté serv
  * entiere dans le dernier message. false = un envoi refuse (la suite n'est
  * pas envoyee).
  */
-async function envoyerMessages(chatId: number, morceaux: string[], boutons?: unknown): Promise<boolean> {
+async function envoyerMessages(chatId: number, morceaux: string[], boutons?: unknown, o: { sansApercu?: boolean } = {}): Promise<boolean> {
   for (const [i, texte] of morceaux.entries()) {
     const dernier = i === morceaux.length - 1
     const ok = await tgCockpit('sendMessage', {
       chat_id: chatId, text: texte, ...(dernier && boutons ? { reply_markup: boutons } : {}),
+      // (21/11, troisieme relecture, A3) Un tableau de noms choisis par les personnes : aucun apercu de lien.
+      ...(o.sansApercu ? { link_preview_options: { is_disabled: true } } : {}),
     })
     if (!ok) return false
   }
@@ -960,12 +970,23 @@ type ContexteLivraison = {
  */
 async function livrerReponse(c: ContexteLivraison, reponse: ReponseAgent, replyHistorique: string = reponse.reply): Promise<void> {
   const { chatId, telegramId, updateId, majUpdate, garde } = c
+  // (21/11, seconde relecture, C4) Le tableau de rapprocher_liste, compose par le serveur, part avec la reponse
+  // (coupee en plusieurs messages par decouperMessage) ; l'historique n'en garde rien (content = replyHistorique).
+  const envoye = reponse.annexe ? `${reponse.reply}\n\n${reponse.annexe}` : reponse.reply
+  const apercu = { sansApercu: !!reponse.annexe }
   // La reponse de ce tour, seule (la question est deja en base). Un rejeu
   // Telegram du MEME update s'est arrete a l'ecriture de la question ; la
   // clause where de chaque upsert reste en ceinture. (29/10) Une reponse
   // partielle (temps) est marquee echec : la demande reste en suspens.
   const tour = JSON.stringify([
-    { role: 'assistant', content: replyHistorique, ...(reponse.inacheve ? { echec: true as const } : {}) },
+    {
+      role: 'assistant',
+      content: replyHistorique,
+      ...(reponse.inacheve ? { echec: true as const } : {}),
+      ...(reponse.traces?.length ? { outils: reponse.traces } : {}),
+      // (21/11) Le texte lu (image, liste passee a l'outil) : A PART, jamais dans content (gardes du serveur).
+      ...(reponse.lu ? { lu: reponse.lu } : {}),
+    },
   ] satisfies MessageStocke[])
 
   if (reponse.action) {
@@ -980,7 +1001,7 @@ async function livrerReponse(c: ContexteLivraison, reponse: ReponseAgent, replyH
         where ${garde}`
       const carte = `⚠️ ${resume}\n\n${cle_manquante
         ?? `La clé d'écriture du compte ${action.compte} n'est pas posée : rien ne peut être exécuté.`}`
-      if (!await envoyerMessages(chatId, messagesAvecCarte(reponse.reply, carte))) await signalerNonPartie(chatId)
+      if (!await envoyerMessages(chatId, messagesAvecCarte(envoye, carte), undefined, apercu)) await signalerNonPartie(chatId)
       return
     }
 
@@ -1005,7 +1026,7 @@ async function livrerReponse(c: ContexteLivraison, reponse: ReponseAgent, replyH
         { text: '❌ Annuler', callback_data: `non:${nonce}` },
       ]],
     }
-    if (!await envoyerMessages(chatId, messagesAvecCarte(reponse.reply, `⚠️ ${resume}`), boutons)) await signalerNonPartie(chatId)
+    if (!await envoyerMessages(chatId, messagesAvecCarte(envoye, `⚠️ ${resume}`), boutons, apercu)) await signalerNonPartie(chatId)
     return
   }
 
@@ -1016,5 +1037,5 @@ async function livrerReponse(c: ContexteLivraison, reponse: ReponseAgent, replyH
     set messages = ${HISTORIQUE_UPSERT}, action_en_attente = null, nonce = null,
         dernier_update_id = ${majUpdate}, maj_le = now()
     where ${garde}`
-  if (!await envoyerMessages(chatId, decouperMessage(reponse.reply))) await signalerNonPartie(chatId)
+  if (!await envoyerMessages(chatId, decouperMessage(envoye), undefined, apercu)) await signalerNonPartie(chatId)
 }

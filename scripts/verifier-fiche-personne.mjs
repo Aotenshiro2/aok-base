@@ -391,7 +391,8 @@ const importe = (texte, module) => new RegExp(`from ['"]@/lib/${module}['"]|from
 
 test('perimetre : seul l\'agent du Cockpit importe la fiche, seul la fiche et l\'agent lisent les messages', () => {
   const fiche = TOUS.filter((f) => importe(f.texte, 'fiche-personne')).map((f) => f.rel)
-  assert.deepEqual(fiche, ['src/lib/agent-cockpit.ts'])
+  // (21/11) + le rapprochement d'une liste (outil de l'agent, meme perimetre) ; tab/lectures.ts (API de Tab) importait deja la fiche.
+  assert.deepEqual(fiche.sort(), ['src/lib/agent-cockpit.ts', 'src/lib/rapprochement-liste.ts', 'src/lib/tab/lectures.ts'])
   const messages = TOUS.filter((f) => f.texte.includes('cockpit_telegram_messages')).map((f) => f.rel).sort()
   assert.deepEqual(messages, ['src/lib/agent-cockpit.ts', 'src/lib/fiche-personne-pur.ts', 'src/lib/fiche-personne.ts'])
   // Le journal n'ecrit les noms que par la fonction, il ne les lit nulle part ailleurs.
