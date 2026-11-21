@@ -248,6 +248,7 @@ export function reponsePartielle(o: { brouillons: readonly string[] }): string {
  */
 export const DESCRIPTIONS_OUTILS: Readonly<Record<string, string>> = {
   requete_sql: 'une lecture de la base',
+  exporter_liste: "l'export en fichier",
   proposer_code_promo: 'la carte de code promo',
   proposer_remboursement: 'la carte de remboursement',
   proposer_revoquer_code: 'la carte qui désactive le code',

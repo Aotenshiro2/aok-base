@@ -230,6 +230,9 @@ export async function POST(req: NextRequest) {
   // dans SON fil Telegram, apres cette reponse (after : la fenetre n'attend pas).
   const relances = reponse.relances ?? []
   delete reponse.relances
+  // (21/11) Aucun fichier d'export ici (ce canal ne declare pas de livraison
+  // de fichier, l'outil le refuse) ; en ceinture, jamais de CSV dans la reponse.
+  delete reponse.fichiers
   if (relances.length) {
     after(async () => {
       for (const r of relances) {

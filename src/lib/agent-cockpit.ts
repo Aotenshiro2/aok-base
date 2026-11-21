@@ -36,6 +36,10 @@ import { controlerCodeParrainage, controlerDeclarationParrainage } from '@/lib/l
 import type { PieceAgent } from '@/lib/liveclub/support-pont-pur'
 import { OUTIL_GENERER_POST, genererPostPourAgent } from '@/lib/generation-agent'
 import { avecVuesServeur } from '@/lib/vues-serveur'
+import {
+  MAX_FICHIERS_PAR_REPONSE, PLAFOND_EXPORT, csvDeLignes, nomFichierExport, noteResultatTronque, resumeExportPourModele,
+  type FichierExport,
+} from '@/lib/agent-export-pur'
 import type Anthropic from '@anthropic-ai/sdk'
 
 // LE CERVEAU de l'agent cockpit, sans interface : prompt systeme, outil SQL
@@ -404,6 +408,12 @@ Les mêmes gestes que les boutons du cockpit, chacun par sa carte, seulement à 
 LES DEMANDES QUE TU NE SAIS PAS ENCORE TRAITER (règle de Brice, 08/10) :
 Quand Brice ou Mélanie te demande une chose qu'aucun de tes outils ne couvre (une fonction qui n'existe pas, une règle à changer, un rapport qui n'existe pas), ne bricole pas et ne promets rien : dis simplement que tu ne sais pas encore le faire, appelle noter_demande (la demande reformulée en une phrase actionnable, et sa citation telle qu'écrite), puis réponds « C'est noté dans les demandes du Cockpit : on l'ajoutera aux tâches. » Aucun délai, aucune date. Une demande que tes outils couvrent (une requête, un outil proposer_*) ne se note pas : traite-la. Un geste qui se fait déjà à la main dans le cockpit : dis où, sans le noter. Une seule note par demande. Si noter_demande renvoie une erreur, dis que la demande n'a pas pu être notée, jamais « c'est noté ».
 
+LES LISTES À REMETTRE (21/11, cas de Mélanie : 145 résiliés en base, 58 rendus) :
+- Une liste de personnes ou de lignes à remettre à quelqu'un (« le contact de tous les membres qui… », des emails, un export, plus d'une vingtaine de lignes) passe par exporter_liste : le serveur fabrique le fichier (CSV pour Excel) et l'envoie lui-même à ton interlocuteur, dans son fil Agent AOK. Tu ne reçois que le nombre de lignes, les colonnes et trois lignes d'aperçu : ne recopie pas la liste dans ta réponse, dis combien de lignes contient le fichier et ce qu'il contient. Une ligne par personne (distinct on, group by), des colonnes nommées en clair (nom, email, telegram, date).
+- Le fichier part toujours à la personne qui te parle, et à elle seule : tu ne choisis ni destinataire, ni adresse, ni lien.
+- Dans la fenêtre du cockpit, le fichier ne peut pas être remis : dis-le, et propose de refaire la demande sur Agent AOK, dans Telegram.
+- Quand requete_sql rend un résultat tronqué (« [résultat tronqué »), ce que tu vois n'est PAS la liste complète : ne le présente jamais comme complet. Compte le vrai total (select count(*)), annonce-le, et pour la liste passe par exporter_liste.
+
 Règles :
 - Réponds en TEXTE BRUT : l'écran n'interprète pas le markdown. Jamais de **, de tableaux avec |, de titres #. Pour aligner des données, fais des lignes simples : « Tristan Gautier · 6 tentatives · prochaine le 29/08 ».
 - La base est en LECTURE SEULE : requete_sql ne modifie jamais rien. Les seules écritures sont les outils proposer_*, qui passent par confirmation humaine, et noter_demande, une note sans effet en production.
@@ -497,9 +507,17 @@ export async function lireAccesFonds(userId: string): Promise<boolean> {
   }
 }
 
-async function executerSql(sql: string, fonds: boolean): Promise<string> {
+/**
+ * (21/11) Le chemin unique d'une lecture de l'agent, pour requete_sql ET
+ * exporter_liste : le verrou (verrouSql), une transaction READ ONLY, le delai
+ * de 8 s, les vues du serveur, et `plafond` lignes au plus. Ne jette jamais.
+ */
+async function lireLignesSql(
+  sql: string, fonds: boolean, plafond: number,
+): Promise<{ lignes: Record<string, unknown>[] } | { erreur: string }> {
   const refus = verrouSql(sql, { fonds })
-  if (refus) return JSON.stringify({ erreur: refus })
+  if (refus) return { erreur: refus }
+  const borne = Math.max(1, Math.floor(plafond))
   try {
     const lignes = await prisma.$transaction(async (tx) => {
       // (15/10) READ ONLY, en premier ordre de la transaction : le filtre de
@@ -511,19 +529,53 @@ async function executerSql(sql: string, fonds: boolean): Promise<string> {
       // Enveloppe : borne dure sur le volume, quelle que soit la requête.
       // (20/10) Les vues gardees par is_cockpit_member() ne rendaient rien ici
       // (role postgres, sans session) : relues par leur fonction serveur.
-      return tx.$queryRawUnsafe(`select * from (${avecVuesServeur(sql)}) sous_requete limit 200`)
+      return tx.$queryRawUnsafe<Record<string, unknown>[]>(`select * from (${avecVuesServeur(sql)}) sous_requete limit ${borne}`)
     })
-    const json = JSON.stringify(lignes, (_k, v) => {
-      if (typeof v === 'bigint') return Number(v)
-      return v
-    })
-    return json.length > MAX_RESULTAT
-      ? `${json.slice(0, MAX_RESULTAT)}… [résultat tronqué, affine la requête]`
-      : json
+    return { lignes }
   } catch (err) {
-    return JSON.stringify({
-      erreur: err instanceof Error ? err.message.split('\n')[0].slice(0, 300) : 'échec de la requête',
-    })
+    return { erreur: err instanceof Error ? err.message.split('\n')[0].slice(0, 300) : 'échec de la requête' }
+  }
+}
+
+const PLAFOND_REQUETE = 200
+
+async function executerSql(sql: string, fonds: boolean): Promise<string> {
+  const lu = await lireLignesSql(sql, fonds, PLAFOND_REQUETE)
+  if ('erreur' in lu) return JSON.stringify({ erreur: lu.erreur })
+  const json = JSON.stringify(lu.lignes, (_k, v) => {
+    if (typeof v === 'bigint') return Number(v)
+    return v
+  })
+  // (21/11) Coupe a l'affichage ou plafond de lignes atteint : la note dit que
+  // ce n'est PAS la liste complete (cas de Melanie : 58 lignes sur 145
+  // presentees comme la liste entiere).
+  if (json.length > MAX_RESULTAT) {
+    return `${json.slice(0, MAX_RESULTAT)}… ${noteResultatTronque({ lignes: lu.lignes.length, coupe: true })}`
+  }
+  if (lu.lignes.length >= PLAFOND_REQUETE) {
+    return `${json} ${noteResultatTronque({ lignes: lu.lignes.length, coupe: false })}`
+  }
+  return json
+}
+
+/**
+ * (21/11) exporter_liste : la meme lecture que requete_sql (lireLignesSql),
+ * jusqu'a PLAFOND_EXPORT lignes, sans la coupe a MAX_RESULTAT. Le CSV reste
+ * au serveur (le canal l'envoie au demandeur) ; le modele recoit le resume.
+ */
+async function exporterListe(entree: unknown, fonds: boolean): Promise<{ contenu: string; fichier?: FichierExport }> {
+  const e = (entree ?? {}) as { sql?: unknown; titre?: unknown }
+  const sql = typeof e.sql === 'string' ? e.sql : ''
+  const lu = await lireLignesSql(sql, fonds, PLAFOND_EXPORT + 1)
+  if ('erreur' in lu) return { contenu: JSON.stringify({ erreur: lu.erreur }) }
+  if (!lu.lignes.length) return { contenu: JSON.stringify({ lignes: 0, remis: 'Aucune ligne : aucun fichier ne part. Dis-le simplement.' }) }
+  const tronque = lu.lignes.length > PLAFOND_EXPORT
+  const lignes = tronque ? lu.lignes.slice(0, PLAFOND_EXPORT) : lu.lignes
+  const { csv, colonnes } = csvDeLignes(lignes)
+  const nom = nomFichierExport(e.titre)
+  return {
+    contenu: resumeExportPourModele({ lignes, colonnes, tronque, nom }),
+    fichier: { nom, csv, lignes: lignes.length, tronque },
   }
 }
 
@@ -533,13 +585,28 @@ const OUTILS: Anthropic.Tool[] = [
   {
     name: 'requete_sql',
     description:
-      'Exécute une requête SQL en LECTURE SEULE (SELECT ou WITH) sur les tables du cockpit (schéma public, PostgreSQL). Le résultat est plafonné à 200 lignes : agrège plutôt que de lister.',
+      'Exécute une requête SQL en LECTURE SEULE (SELECT ou WITH) sur les tables du cockpit (schéma public, PostgreSQL). Le résultat est plafonné à 200 lignes et coupé vers 14 000 caractères : agrège plutôt que de lister. Une liste à remettre à quelqu\'un passe par exporter_liste.',
     input_schema: {
       type: 'object',
       properties: {
         sql: { type: 'string', description: 'La requête SELECT à exécuter.' },
       },
       required: ['sql'],
+    },
+  },
+  // (21/11) Une liste a remettre : la meme lecture, en fichier, envoye par le
+  // serveur a la personne qui parle (jamais un destinataire du modele).
+  {
+    name: 'exporter_liste',
+    description:
+      `Exporte une LISTE (personnes, contacts, lignes) en fichier CSV pour Excel, que le serveur envoie à ton interlocuteur dans son fil Agent AOK (Telegram), après ta réponse. Même lecture seule et mêmes refus que requete_sql, jusqu'à ${PLAFOND_EXPORT} lignes, sans coupe à l'affichage. Tu reçois le nombre de lignes, les colonnes et 3 lignes d'aperçu, jamais la liste entière. Le destinataire est toujours la personne qui te parle.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        sql: { type: 'string', description: 'La requête SELECT qui rend la liste, une ligne par personne, colonnes nommées en clair.' },
+        titre: { type: 'string', description: 'Deux à cinq mots pour le nom du fichier (« résiliés Live Club »). Ni adresse, ni lien.' },
+      },
+      required: ['sql', 'titre'],
     },
   },
   // Les trois outils d'action : un appel n'execute RIEN, il est intercepte par
@@ -1511,6 +1578,12 @@ export type CanalAgent = {
   /** (29/10) Le fil Telegram du tour (chat_id), null a la fenetre du cockpit. */
   chatId?: number | null
   /**
+   * (21/11) Le canal remet un fichier (exporter_liste) a la personne qui parle,
+   * et a elle seule : Telegram l'envoie dans le fil du tour. Absent = pas de
+   * fichier possible (fenetre du cockpit) : l'outil le dit au modele.
+   */
+  livraisonFichier?: boolean
+  /**
    * (29/10) Le message du tour porte du texte suspect (injection-pur.ts) :
    * aucune carte ni aucun geste sans carte dans ce tour, une note au modele.
    * L'alerte a Brice est partie du canal.
@@ -1574,6 +1647,8 @@ export type ReponseAgent = {
   inacheve?: boolean
   /** (29/10) Demandes de l'equipe a relancer dans leur fil (reprendre_demande), APRES cette reponse. */
   relances?: RelanceEquipe[]
+  /** (21/11) Les fichiers d'exporter_liste, que le canal envoie au demandeur APRES cette reponse. */
+  fichiers?: FichierExport[]
 }
 
 /**
@@ -1743,9 +1818,12 @@ export async function boucleAgent(
   const brouillons: string[] = []
   let generations = 0
   const relances: RelanceEquipe[] = []
+  // (21/11) Les fichiers d'exporter_liste : joints a toute reponse rendue (avecRelances).
+  const fichiers: FichierExport[] = []
   // (29/10) Une question posee a l'equipe : la reponse au titulaire la cite,
   // telle qu'elle part (ajoutee par le serveur, jamais reecrite par le modele).
-  const avecRelances = (r: ReponseAgent): ReponseAgent => {
+  const avecRelances = (reponse: ReponseAgent): ReponseAgent => {
+    const r = fichiers.length ? { ...reponse, fichiers } : reponse
     if (!relances.length) return r
     const citations = relances.map(citationQuestion).filter((c): c is string => !!c)
     return { ...r, reply: citations.length ? `${r.reply}\n\n${citations.join('\n')}` : r.reply, relances }
@@ -2165,9 +2243,36 @@ export async function boucleAgent(
           continue
         }
 
+        // (21/11) Une liste a remettre, en fichier. Sous prudence : refusee
+        // (des donnees en masse ne sortent pas d'un tour suspect). Le fichier
+        // ne part que par un canal qui sait le remettre au demandeur, a lui
+        // seul (livraisonFichier) ; le modele ne choisit aucun destinataire.
+        if (bloc.name === 'exporter_liste') {
+          const refusExport = prudence ? REFUS_PRUDENCE
+            : !canal.livraisonFichier ? "Ici, dans la fenêtre du cockpit, aucun fichier ne peut être remis : dis-le à ton interlocuteur, et propose-lui de refaire la demande sur Agent AOK, dans Telegram, où le fichier lui sera envoyé."
+              : fichiers.length >= MAX_FICHIERS_PAR_REPONSE ? `Pas plus de ${MAX_FICHIERS_PAR_REPONSE} fichiers par réponse : regroupe la demande.`
+                : null
+          if (refusExport) {
+            resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify({ erreur: refusExport }), is_error: true })
+            continue
+          }
+          const ex = await exporterListe(bloc.input, accesFonds)
+          etapes.push({ sql: String((bloc.input as { sql?: unknown } | null)?.sql ?? ''), resultat_tronque: ex.fichier?.tronque === true })
+          // L'apercu porte des propos de tiers (noms, textes) : surveille comme
+          // requete_sql. Suspect = le tour passe sous prudence, le fichier reste au serveur.
+          let contenuExport = await surveillerResultat(ex.contenu)
+          if (ex.fichier && !prudence) fichiers.push(ex.fichier)
+          else if (ex.fichier) contenuExport += "\n[Le fichier N'EST PAS envoyé : du texte suspect a été repéré dans la liste. Dis-le à ton interlocuteur.]"
+          resultats.push({
+            type: 'tool_result', tool_use_id: bloc.id, content: contenuExport,
+            ...(ex.fichier || !ex.contenu.startsWith('{"erreur"') ? {} : { is_error: true }),
+          })
+          continue
+        }
+
         const sql = String((bloc.input as { sql?: string })?.sql ?? '')
         const resultat = await executerSql(sql, accesFonds)
-        etapes.push({ sql, resultat_tronque: resultat.endsWith(']') === false })
+        etapes.push({ sql, resultat_tronque: resultat.includes('[résultat tronqué') })
         // (29/10) Propos de tiers (fils Support, groupes, archive) : le texte cache y est signale.
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: await surveillerResultat(resultat) })
       }
