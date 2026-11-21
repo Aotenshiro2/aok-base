@@ -1,6 +1,29 @@
 # ETAT du journal d etudes
 
-## VEILLE BUNNY : SOLDE PREPAYE BAS = MESSAGE A L'EQUIPE PAR AGENT AOK (21/11/2026, commite NON pousse, branche bunny-conso ; migration 20261121100000 ECRITE, NON appliquee, dans le workspace)
+## VEILLE BUNNY, CORRECTIFS : PANNE DU SUIVI SIGNALEE, AGE DU RELEVE DIT, UN MESSAGE PAR JOUR ET PAR TYPE (21/11/2026, commite NON pousse, branche bunny-correctifs ; migration 20261121150000 ECRITE, NON appliquee, branche bunny-correctifs du workspace)
+
+- Suite d'une relecture : (a) releve du jour sans solde (facturation en panne, cle revoquee) ou dernier releve de plus
+  de 30 h (PC eteint) = personne prevenu ; (b) apres une recharge, PC eteint le lendemain, la veille relisait le releve
+  d'hier encore en alerte et affirmait « a recharger » ; (c) aucun anti-doublon, un cron relance renvoyait le message.
+- veille-bunny-pur.ts : messagesVeilleBunny(releve, dernierSolde, maintenant) rend au plus un 'alerte' et un 'panne'.
+  'alerte' : releve de moins de 30 h en alerte ; le texte commence par l'age (« Bunny (relevé il y a 23 h) ») et, au-dela
+  de 12 h, ajoute « Si le compte a été rechargé depuis ce relevé, rien à faire. ». Alerte sans jours d'avance (collecte
+  repliee sur le plancher de solde de 5 $) : « rythme inconnu mais solde bas ». 'panne' : « le suivi ne lit plus le solde
+  depuis le 20/11 à 8 h 40 (il y a 31 h) », raison (aucun releve / releve sans solde), dernier solde connu ; SEULEMENT si
+  un releve avec solde a deja existe (cle jamais posee = silence).
+- veille-bunny.ts : lit le dernier releve et le dernier releve AVEC solde ; chaque message reserve (jour de Paris, type)
+  dans cockpit_bunny_veille_envois (insert on conflict do nothing, comme cockpit_liveclub_resumes) AVANT l'envoi ; deja
+  la = pas renvoye (synthese.bunny.deja) ; 0 livre = ligne retiree pour reessayer. Table absente : repli, envoi comme
+  avant (synthese.bunny.sansTrace). Synthese { lu, alerte, panne, livres, deja }.
+- Migration : workspace sites/Aoknowledgecom/supabase/migrations/20261121150000_cockpit_bunny_veille_envois.sql.
+- Verif : node scripts/verifier-veille-bunny.mjs (ok), tsc et eslint propres. Rien envoye en reel.
+- Collecte (meme jour, hors git, D:\6_Societe\Pilotage\Data-Performance\automations\collect_bunny.py, copie
+  collect_bunny.avant-2026-11-21.py) : rythme sur la baisse du solde entre releves, pas de redirection, toutes les
+  exceptions attrapees, un passage sans facturation n'ecrase plus le releve du jour, plancher mensuel dans
+  details.plancher ; tests hors reseau test_collect_bunny.py.
+- Mise en ligne : appliquer 20261121150000 (sinon repli sans anti-doublon), pousser master.
+
+## VEILLE BUNNY : SOLDE PREPAYE BAS = MESSAGE A L'EQUIPE PAR AGENT AOK (21/11/2026, POUSSE (15596fa sur master) ; migration 20261121100000 appliquee en prod d'apres le brief du 21/11)
 
 - Pourquoi : le compte bunny.net (videos et PDF de l'academie) est prepaye ; a zero il est suspendu et les videos
   s'arretent. Le 21/11 : 1,44 $ de solde, environ 4 jours d'avance, rien ne le suivait.

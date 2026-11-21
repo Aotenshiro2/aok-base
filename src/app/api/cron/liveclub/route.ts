@@ -39,8 +39,9 @@ export async function GET(req: NextRequest) {
   if (!autorise(req)) return NextResponse.json({ ok: false, erreur: 'Unauthorized' }, { status: 401 })
   try {
     const synthese = await passageQuotidien()
-    // (21/11) La veille Bunny : solde prepaye sous le seuil = message a l'equipe par Agent AOK.
-    const bunny = await veilleBunny().catch(() => ({ lu: false, alerte: false, livres: 0 }))
+    // (21/11) La veille Bunny : solde prepaye sous le seuil, ou suivi qui ne lit plus le solde =
+    // message a l'equipe par Agent AOK, au plus une fois par jour et par type.
+    const bunny = await veilleBunny().catch(() => ({ lu: false, alerte: false, panne: false, livres: 0, deja: 0 }))
     return NextResponse.json({ ...synthese, bunny })
   } catch (err) {
     // Filet : passageQuotidien rend ses erreurs dans la synthese.
