@@ -390,8 +390,15 @@ bloc('le code branche la securite : prompts, outils, verrous, gardes', () => {
   // (mesure du 29/10) Nos propres lignes « [système] » (historique d'Agent AOK) ne passent jamais au niveau
   // 'injection' : le tour analyse ses parts ('cache' / 'tiers'), une reprise rien, les resultats d'outils en 'cache'.
   assert.match(tg, /const parts = e\.reprise \? \{ titulaire: '', transmis: '' \} : partsDuTour\(texte\)/)
-  // (21/11) + le texte lu d'un tour (image, liste passee a rapprocher_liste), au meme niveau 'cache'.
-  assert.deepEqual([...agent.matchAll(/analyserTexte\([^)]*niveau: '(\w+)'/g)].map(m => m[1]), ['cache', 'cache'])
+  // (21/11, seconde relecture) Precisement : les resultats d'outils restent en 'cache' (surveillerResultat), le
+  // texte lu d'un tour (image, liste passee a rapprocher_liste) passe en 'injection' (noterLu), rien en 'tiers'.
+  assert.deepEqual([...agent.matchAll(/analyserTexte\([^)]*niveau: '(\w+)'/g)].map(m => m[1]), ['cache', 'injection'])
+  assert.match(agent, /const surveillerResultat = async \(contenu: string\): Promise<string> => \{\n\s*const a = analyserTexte\(contenu, \{ niveau: 'cache' \}\)/)
+  assert.match(agent, /const noterLu = \(m: MorceauLu\): void => \{\n\s*const a = analyserTexte\(m\.texte, \{ niveau: 'injection' \}\)/)
+  assert.equal([...agent.matchAll(/niveau: 'injection'/g)].length, 1, 'un seul texte au niveau injection : le texte lu')
+  assert.ok(!/niveau: 'tiers'/.test(agent), "rien au niveau 'tiers' dans l'agent")
+  // Les messages de l'historique : analyses par le canal ('cache' / 'tiers' sur les parts du tour, rien sur une reprise), jamais 'injection'.
+  assert.ok(!/analyserTexte\(historique/.test(agent))
   const historique = JSON.stringify([...T.entreesQuestionEquipe({ id: 'a1', par: 'Brice', parChat: 1, texte: 'Pulse ?', le: '2026-10-29T10:00:00Z' }),
     { role: 'user', content: "[système] Résumé du matin du Live Club, envoyé automatiquement par Agent AOK (ce n'est pas une question de l'équipe)." }])
   assert.equal(S.analyserTexte(historique, { niveau: 'cache' }).suspect, false)

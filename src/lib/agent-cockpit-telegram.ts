@@ -968,6 +968,9 @@ type ContexteLivraison = {
  */
 async function livrerReponse(c: ContexteLivraison, reponse: ReponseAgent, replyHistorique: string = reponse.reply): Promise<void> {
   const { chatId, telegramId, updateId, majUpdate, garde } = c
+  // (21/11, seconde relecture, C4) Le tableau de rapprocher_liste, compose par le serveur, part avec la reponse
+  // (coupee en plusieurs messages par decouperMessage) ; l'historique n'en garde rien (content = replyHistorique).
+  const envoye = reponse.annexe ? `${reponse.reply}\n\n${reponse.annexe}` : reponse.reply
   // La reponse de ce tour, seule (la question est deja en base). Un rejeu
   // Telegram du MEME update s'est arrete a l'ecriture de la question ; la
   // clause where de chaque upsert reste en ceinture. (29/10) Une reponse
@@ -995,7 +998,7 @@ async function livrerReponse(c: ContexteLivraison, reponse: ReponseAgent, replyH
         where ${garde}`
       const carte = `⚠️ ${resume}\n\n${cle_manquante
         ?? `La clé d'écriture du compte ${action.compte} n'est pas posée : rien ne peut être exécuté.`}`
-      if (!await envoyerMessages(chatId, messagesAvecCarte(reponse.reply, carte))) await signalerNonPartie(chatId)
+      if (!await envoyerMessages(chatId, messagesAvecCarte(envoye, carte))) await signalerNonPartie(chatId)
       return
     }
 
@@ -1020,7 +1023,7 @@ async function livrerReponse(c: ContexteLivraison, reponse: ReponseAgent, replyH
         { text: '❌ Annuler', callback_data: `non:${nonce}` },
       ]],
     }
-    if (!await envoyerMessages(chatId, messagesAvecCarte(reponse.reply, `⚠️ ${resume}`), boutons)) await signalerNonPartie(chatId)
+    if (!await envoyerMessages(chatId, messagesAvecCarte(envoye, `⚠️ ${resume}`), boutons)) await signalerNonPartie(chatId)
     return
   }
 
@@ -1031,5 +1034,5 @@ async function livrerReponse(c: ContexteLivraison, reponse: ReponseAgent, replyH
     set messages = ${HISTORIQUE_UPSERT}, action_en_attente = null, nonce = null,
         dernier_update_id = ${majUpdate}, maj_le = now()
     where ${garde}`
-  if (!await envoyerMessages(chatId, decouperMessage(reponse.reply))) await signalerNonPartie(chatId)
+  if (!await envoyerMessages(chatId, decouperMessage(envoye))) await signalerNonPartie(chatId)
 }

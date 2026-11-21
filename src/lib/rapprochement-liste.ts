@@ -26,8 +26,8 @@ import type { Prisma } from '@prisma/client'
 import { lireQui, type Groupe, type QuiLu } from '@/lib/fiche-personne-pur'
 import { resoudrePersonne } from '@/lib/fiche-personne'
 import {
-  MAX_ENTREE, NOTE_POPULATION, PLAFOND_POPULATION, POPULATIONS, candidatsParNom, comptesDuGroupe, indexerNoms, lignePersonne,
-  lireEntreeListe, probablesDuGroupe, reponseListe, type CompteLu, type EntreeListe, type FaitsPersonne, type LignePersonne,
+  MAX_ENTREE, NOTE_POPULATION, ancienRattachementProbable, voieDeLaTouche, PLAFOND_POPULATION, POPULATIONS, candidatsParNom, comptesDuGroupe, indexerNoms, lignePersonne,
+  lireEntreeListe, probablesDuGroupe, reponseListe, trouveParFragment, type CompteLu, type EntreeListe, type FaitsPersonne, type LignePersonne,
   type NomAffiche, type Voie,
 } from '@/lib/rapprochement-liste-pur'
 
@@ -63,8 +63,11 @@ async function essayer<T>(fin: number, quoi: string, f: (tx: Tx) => Promise<T>):
   }
 }
 
-/** Une personne a resoudre : ce qu'on a donne, ou une fiche de la population (avec son nom, pour une relance). */
-type Item = { entree: string | null; qui: QuiLu | null; nom?: string | null }
+/**
+ * Une personne a resoudre : ce qu'on a donne, ou une fiche de la population (avec son nom). (21/11, seconde
+ * relecture) `cle` : ce qu'une relance repasse TEL QUEL (l'entree brute, ou membre:<uuid>).
+ */
+type Item = { entree: string | null; qui: QuiLu | null; nom?: string | null; cle: string }
 
 /**
  * La personne retenue parmi les groupes rendus. Un seul groupe : c'est elle.
@@ -99,12 +102,8 @@ function indicesDeLaReponse(reponse: string): string[] {
   } catch { return [] }
 }
 
-/** Une entree par NOM qui n'a touche la fiche que par fragment (pas d'egalite). */
-function parFragment(qui: QuiLu, g: Groupe): boolean {
-  if (qui.genre !== 'texte') return false
-  const surFiche = g.touches.filter((t) => t.noeud.startsWith('membre:'))
-  return surFiche.length > 0 && !surFiche.some((t) => t.exact)
-}
+/** Une entree par NOM sans aucune touche exacte dans tout le groupe (trouveParFragment, -pur.ts). */
+const parFragment = (qui: QuiLu, g: Groupe): boolean => trouveParFragment(qui, g.touches)
 
 /** Resout les items d'un paquet, chacun par resoudrePersonne. */
 async function resoudrePaquet(tx: Tx, items: Item[], fonds: boolean): Promise<Resolu[]> {
@@ -139,7 +138,7 @@ async function itemsDeLaPopulation(tx: Tx, population: keyof typeof POPULATIONS)
     having bool_or(a.statut in ${VIVANT}) = $1
     order by 1`, vivant)
   return l.map((x) => ({
-    entree: null, qui: { genre: 'membre', id: x.id },
+    entree: null, qui: { genre: 'membre', id: x.id }, cle: `membre:${x.id}`,
     nom: [x.prenom, x.nom].filter(Boolean).join(' ').trim() || null,
   }))
 }
@@ -150,7 +149,7 @@ const uniques = <T>(l: T[]) => [...new Set(l)]
  * Le rapprochement : la reponse au modele (JSON borne) et le nombre de lignes
  * rendues. Ne leve jamais : une panne revient en JSON, sans donnee.
  */
-export async function rapprocherListePourAgent(entree: unknown, o: { fonds: boolean; dureeMaxMs?: number }): Promise<{ texte: string; lignes: number }> {
+export async function rapprocherListePourAgent(entree: unknown, o: { fonds: boolean; dureeMaxMs?: number }): Promise<{ texte: string; lignes: number; tableau?: string }> {
   const lu = lireEntreeListe(entree)
   if ('erreur' in lu) return { texte: JSON.stringify({ statut: 'erreur', erreur: lu.erreur }), lignes: 0 }
   try {
@@ -162,23 +161,31 @@ export async function rapprocherListePourAgent(entree: unknown, o: { fonds: bool
   }
 }
 
-export async function rapprocher(lu: EntreeListe, o: { fonds: boolean; dureeMaxMs?: number }): Promise<{ texte: string; lignes: number; resultats: LignePersonne[]; faits: FaitsPersonne[] }> {
+export async function rapprocher(lu: EntreeListe, o: { fonds: boolean; dureeMaxMs?: number }): Promise<{ texte: string; lignes: number; resultats: LignePersonne[]; faits: FaitsPersonne[]; tableau?: string }> {
   const fin = Date.now() + (o.dureeMaxMs ?? DUREE_MAX_MS)
 
   // 0. Les personnes : la liste donnee, ou une page de la population.
   let items: Item[]
   let page: { page: number; pages: number; total: number; parPage: number } | undefined
   if (lu.genre === 'population') {
-    const tous = await lire((tx) => itemsDeLaPopulation(tx, lu.population))
+    // (21/11, seconde relecture) La lecture de la population teste le temps aussi.
+    const tous = await essayer(fin, 'population', (tx) => itemsDeLaPopulation(tx, lu.population))
+    if (!tous) {
+      return { texte: JSON.stringify({ statut: 'erreur', complet: false, erreur: "La population n'a pas pu être lue (temps ou erreur) : rien à conclure, relance la demande dans un instant." }), lignes: 0, resultats: [], faits: [] }
+    }
     const pages = Math.max(1, Math.ceil(tous.length / PLAFOND_POPULATION))
-    const p = Math.min(Math.max(1, Math.floor(lu.page) || 1), pages)
+    const demandee = Math.max(1, Math.floor(lu.page) || 1)
+    if (demandee > pages) {
+      return { texte: JSON.stringify({ statut: 'erreur', erreur: `page ${demandee} hors borne : la population compte ${tous.length} personnes, en ${pages} page${pages > 1 ? 's' : ''} de ${PLAFOND_POPULATION}.` }), lignes: 0, resultats: [], faits: [] }
+    }
+    const p = demandee
     items = tous.slice((p - 1) * PLAFOND_POPULATION, p * PLAFOND_POPULATION)
     page = { page: p, pages, total: tous.length, parPage: PLAFOND_POPULATION }
   } else {
     items = lu.personnes.map((p) => {
-      if (p.length > MAX_ENTREE) return { entree: p, qui: null }
+      if (p.length > MAX_ENTREE) return { entree: p, qui: null, cle: p }
       const q = lireQui(p)
-      return { entree: p, qui: 'erreur' in q ? null : q }
+      return { entree: p, qui: 'erreur' in q ? null : q, cle: p }
     })
   }
 
@@ -225,7 +232,7 @@ export async function rapprocher(lu: EntreeListe, o: { fonds: boolean; dureeMaxM
     const m = membresDe(r.groupe)
     const fiche = m.map((id) => fiches.get(id)).find((x) => x && (x.prenom || x.nom))
     const nomFiche = fiche ? [fiche.prenom, fiche.nom].filter(Boolean).join(' ').trim() || null : (r.item.nom ?? null)
-    const commun = { entree: r.item.entree, fiche: nomFiche, ...(r.indices.length ? { indices: r.indices } : {}) }
+    const commun = { entree: r.item.entree, cle: r.item.cle, fiche: nomFiche, ...(r.indices.length ? { indices: r.indices } : {}) }
     if (!r.groupe) return { ...commun, statut: r.statut, durs: [], probables: [], pseudoDeclare: null, candidats: [], nbPersonnes: r.nbPersonnes }
     const c = comptesDuGroupe(r.groupe)
     const p = probablesDuGroupe(r.groupe)
@@ -260,9 +267,17 @@ export async function rapprocher(lu: EntreeListe, o: { fonds: boolean; dureeMaxM
           const groupes = r.statut === 'un' ? [r.groupe] : r.statut === 'plusieurs' ? r.groupes : []
           for (const g of groupes) {
             const c = comptesDuGroupe(g)
-            // Un groupe qui porte la fiche, ou un compte identifie EXACTEMENT par cet email.
+            // Un groupe qui porte la fiche, ou un compte identifie EXACTEMENT par cet email. (21/11, seconde
+            // relecture, B3) Par une touche qui PROUVE (voieDeLaTouche) et pas un ancien rattachement hors bot :
+            // l'email d'un rattachement retire peut designer le compte d'un AUTRE membre, il reste probable.
             if (g.noeuds.some((n) => siens.has(n))) x.durs.push(...c.durs)
-            else x.durs.push(...c.durs.filter((d) => g.touches.some((t) => t.noeud === `tg:${d.id}`)))
+            else {
+              for (const d of c.durs) {
+                const touches = g.touches.filter((t) => t.noeud === `tg:${d.id}`)
+                if (touches.some((t) => voieDeLaTouche(t.champ) !== null && !ancienRattachementProbable(t.champ))) x.durs.push(d)
+                else if (touches.length) x.probables.push(d)
+              }
+            }
             x.probables.push(...c.probables)
           }
         }
@@ -308,6 +323,8 @@ export async function rapprocher(lu: EntreeListe, o: { fonds: boolean; dureeMaxM
   // 5. Les comptes a nommer, puis les lignes. Sans cette lecture (temps, erreur), les comptes restent « nom inconnu ».
   const ids = uniques(faits.flatMap((f) => [...f.durs.map((x) => x.id), ...f.probables.map((x) => x.id), ...f.candidats]))
   const comptes = new Map<number, CompteLu>()
+  // (21/11, seconde relecture, C1) Etape manquee (temps, erreur) : jamais « complet », jamais « sans aucun nom ».
+  let nomsNonLus = false
   if (ids.length) {
     const l = await essayer(fin, 'noms des comptes', (tx) => tx.$queryRawUnsafe<{ id: string; gp: string | null; gn: string | null; present: boolean | null; registre: boolean; np: string | null; nn: string | null }[]>(`
       select t.id::text as id, g.pseudo as gp, g.nom_affiche as gn, g.present, g.telegram_id is not null as registre,
@@ -315,17 +332,20 @@ export async function rapprocher(lu: EntreeListe, o: { fonds: boolean; dureeMaxM
         (select n.nom_affiche from public.cockpit_telegram_noms n where n.telegram_id = t.id and nullif(n.nom_affiche, '') is not null order by n.dernier_vu desc limit 1) as nn
       from unnest($1::bigint[]) as t(id)
       left join public.cockpit_telegram_membres g on g.telegram_id = t.id`, ids))
+    if (!l) nomsNonLus = true
     for (const x of l ?? []) {
       comptes.set(Number(x.id), { id: Number(x.id), pseudo: x.gp || x.np || null, nom: x.gn || x.nn || null, present: x.present === true, registre: x.registre })
     }
   }
   const resultats = faits.map((f) => lignePersonne(f, comptes))
+    .map((l) => (nomsNonLus && l.telegram ? { ...l, telegram: l.telegram.replace(/\(nom inconnu\)/g, '(nom non lu)') } : l))
   const quoi = lu.genre === 'population' ? POPULATIONS[lu.population] : `liste de ${lu.personnes.length} entrées`
-  const { texte, lignesRendues } = reponseListe(resultats, {
+  const { texte, lignesRendues, tableau } = reponseListe(resultats, {
     quoi, doublons: lu.genre === 'liste' ? lu.doublons : 0, page,
     ...(lu.genre === 'population' ? { notePopulation: NOTE_POPULATION } : {}),
+    ...(nomsNonLus ? { nomsNonLus: true } : {}),
   })
-  return { texte, lignes: lignesRendues, resultats, faits }
+  return { texte, lignes: lignesRendues, resultats, faits, tableau }
 }
 
 /** Un compte une seule fois, sa premiere voie gardee. */

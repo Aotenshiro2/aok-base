@@ -233,6 +233,9 @@ export async function POST(req: NextRequest) {
   // (21/11) La trace des outils et le texte lu restent au serveur : jamais dans le JSON de la fenetre.
   delete reponse.traces
   delete reponse.lu
+  // (21/11, seconde relecture, C4) Le tableau de rapprocher_liste, compose par le serveur, joint a la reponse affichee.
+  if (reponse.annexe) reponse.reply = `${reponse.reply}\n\n${reponse.annexe}`
+  delete reponse.annexe
   if (relances.length) {
     after(async () => {
       for (const r of relances) {

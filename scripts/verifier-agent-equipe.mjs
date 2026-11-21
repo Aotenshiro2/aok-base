@@ -102,7 +102,9 @@ bloc('le filet du canal : un « Je vérifie » est toujours suivi d une reponse 
   assert.match(src, /ajouterReponseSeule\(chatId, texteErreur, \{ echec: true \}\)/)
   // La reponse ne part plus en un seul sendMessage : coupee, et un refus est dit.
   assert.ok(!/text: reponse\.reply \}/.test(src), 'plus de sendMessage brut de la reponse')
-  assert.match(src, /if \(!await envoyerMessages\(chatId, decouperMessage\(reponse\.reply\)\)\) await signalerNonPartie/)
+  // (21/11, seconde relecture) La reponse part avec le tableau de rapprocher_liste joint par le serveur (envoye).
+  assert.match(src, /const envoye = reponse\.annexe \? `\$\{reponse\.reply\}\\n\\n\$\{reponse\.annexe\}` : reponse\.reply/)
+  assert.match(src, /if \(!await envoyerMessages\(chatId, decouperMessage\(envoye\)\)\) await signalerNonPartie/)
   for (const t of [TEXTE_TEMPS_DEPASSE, TEXTE_REPONSE_NON_PARTIE, TEXTE_TROP_DE_BROUILLONS, TEXTE_PLUS_LE_TEMPS_BROUILLON]) {
     assert.ok(!HORS_CLAVIER.test(t), t)
   }
