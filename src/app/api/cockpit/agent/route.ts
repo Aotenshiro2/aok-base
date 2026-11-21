@@ -240,6 +240,9 @@ export async function POST(req: NextRequest) {
   // (21/11, seconde relecture, C4) Le tableau de rapprocher_liste, compose par le serveur, joint a la reponse affichee.
   if (reponse.annexe) reponse.reply = `${reponse.reply}\n\n${reponse.annexe}`
   delete reponse.annexe
+  // (21/11) Aucun fichier d'export ici (ce canal ne declare pas de livraison
+  // de fichier, l'outil le refuse) ; en ceinture, jamais de CSV dans la reponse.
+  delete reponse.fichiers
   if (relances.length) {
     after(async () => {
       for (const r of relances) {

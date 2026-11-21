@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db'
 import { boucleAgent, type ReponseAgent } from '@/lib/agent-cockpit'
 import type { TraceOutil } from '@/lib/agent-outils-trace-pur'
 import { auteurDemande, libelleBoutonConfirmer, messageRenvoye } from '@/lib/agent-cockpit-pur'
+import { legendeExport, type FichierExport } from '@/lib/agent-export-pur'
 import { validerAction, executerAction, RefusAction, expurgerLiensInvitation, paramsPourLog } from '@/lib/stripe-actions'
 import {
   DUREE_TOUR_DEFAUT_MS, GRACE_FILET_MS, MAX_OCTETS_IMAGE, MAX_OCTETS_VOCAL, MAX_TEXTE_TOUR_VOCAL, MAX_TRANSCRIPTION,
@@ -185,6 +186,36 @@ export async function tgCockpitAppel(
     return { ok: false, description: 'reseau' }
   }
 }
+
+/**
+ * (21/11) Une liste exportee (exporter_liste) en document Telegram, dans le
+ * fil du tour : `chatId` vient toujours du tour (compte de l'equipe verifie),
+ * jamais du modele. Les octets partent depuis la memoire, rien sur disque.
+ * Ne jette jamais ; un refus est dit en clair dans le fil, loggue sans le contenu.
+ */
+async function envoyerFichierExport(chatId: number, f: FichierExport): Promise<boolean> {
+  const jeton = jetonBot()
+  let ok = false
+  if (!jeton) {
+    console.error('[cockpit/telegram] sendDocument : TELEGRAM_BOT_TOKEN_COCKPIT absent du projet journal')
+  } else {
+    try {
+      const form = new FormData()
+      form.append('chat_id', String(chatId))
+      form.append('caption', legendeExport(f))
+      form.append('document', new Blob([f.csv], { type: 'text/csv;charset=utf-8' }), f.nom)
+      const reponse = await fetch(`${API_TG}/bot${jeton}/sendDocument`, { method: 'POST', body: form })
+      ok = reponse.ok
+      if (!ok) console.error(`[cockpit/telegram] sendDocument (export de ${f.lignes} lignes) : HTTP ${reponse.status} ${(await reponse.text()).slice(0, 200)}`)
+    } catch (err) {
+      console.error('[cockpit/telegram] sendDocument (export)', err instanceof Error ? err.message.split('\n')[0].slice(0, 160) : '?')
+    }
+  }
+  if (!ok) await tgCockpit('sendMessage', { chat_id: chatId, text: TEXTE_EXPORT_NON_PARTI })
+  return ok
+}
+
+const TEXTE_EXPORT_NON_PARTI = "Le fichier de la liste n'a pas pu partir (Telegram l'a refusé). Redemande-le-moi dans un instant."
 
 /**
  * Une ligne de cockpit_agent_conversations.messages. `id` (15/10) : la
@@ -825,6 +856,8 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
     }),
     derniereReponse,
     chatId,
+    // (21/11) Un export part dans CE fil (chatId du tour, compte verifie), jamais ailleurs.
+    livraisonFichier: true,
     prudence: analyse.suspect ? analyse : null,
     sourceAlerte,
   })
@@ -865,6 +898,9 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
     await tgCockpit('sendMessage', { chat_id: chatId, text: enTete(TEXTE_ERREUR_AGENT) })
     return 'traite'
   }
+
+  // (21/11) Les listes exportees (exporter_liste) : dans CE fil, apres la reponse.
+  for (const f of reponse.fichiers ?? []) await envoyerFichierExport(chatId, f)
 
   // (29/10) « Reprends la demande de Mel » : le tour de Mel, dans SON fil,
   // APRES cette reponse, avec le temps qui reste a cette fonction. Une reprise

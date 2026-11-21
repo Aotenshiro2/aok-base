@@ -1,5 +1,32 @@
 # ETAT du journal d etudes
 
+## AGENT AOK : LES LISTES EN FICHIER CSV, PLUS DE LISTE COUPEE PRESENTEE COMME COMPLETE (21/11/2026, commite NON pousse, branche agent-export-liste depuis origin/master 2c7bc69 ; aucune migration)
+
+- Cause : Melanie demande le contact de tous les resilies du Live Club (145 en base), l'agent en rend 58 puis 59.
+  requete_sql (executerSql, agent-cockpit.ts) borne a 200 lignes puis coupe le JSON a MAX_RESULTAT = 14000 caracteres ;
+  une ligne nom + email + Telegram pese environ 240 caracteres, donc coupe vers la 58e ligne, et la seule mention etait
+  « [résultat tronqué, affine la requête] », que le modele a ignoree.
+- Outil exporter_liste (agent-cockpit.ts) : sql + titre, rien d'autre (aucun destinataire, adresse ou lien du modele).
+  Meme lecture que requete_sql par lireLignesSql (verrouSql, transaction read only, 8 s, avecVuesServeur), plafond
+  PLAFOND_EXPORT = 5000 lignes (lit 5001 pour savoir s'il y en a plus), sans la coupe a 14 000. Le CSV reste au serveur
+  (ReponseAgent.fichiers) ; le modele recoit nombre de lignes, colonnes, 3 lignes d'apercu (passees par
+  surveillerResultat). Refuse sous prudence, refuse si le canal n'a pas livraisonFichier, 2 fichiers par reponse au plus ;
+  apercu suspect = fichier retenu.
+- CSV (src/lib/agent-export-pur.ts) : BOM UTF-8, point-virgule, CRLF, virgule decimale, dates AAAA-MM-JJ [HH:MM:SS],
+  apostrophe devant un texte qui commence par = + - @ (pas de formule Excel ; un « @pseudo » s'affiche donc « '@pseudo »).
+  Nom liste-<titre en a-z0-9>-<jour de Paris>.csv.
+- Telegram (agent-cockpit-telegram.ts) : livraisonFichier: true ; envoyerFichierExport(chatId du tour) en sendDocument
+  multipart apres livrerReponse, legende « 145 lignes. Fichier CSV, s'ouvre dans Excel. » ; refus = message clair dans
+  le fil. Fenetre du cockpit (route web) : pas de livraison (l'outil repond de passer par Agent AOK sur Telegram), et
+  delete reponse.fichiers en ceinture. Pas d'affichage de fichier dans le front du cockpit (autre app).
+- Prompt : section « LES LISTES À REMETTRE » ; requete_sql coupe ou a 200 lignes ajoute une note (noteResultatTronque) :
+  ce n'est PAS la liste complete, compter le total et passer par l'export. Au passage, etapes.resultat_tronque etait
+  toujours faux (endsWith(']') sur un JSON) : il lit maintenant la note.
+- Verif : node scripts/verifier-export-liste.mjs (6 blocs), -securite-bots, -agent-equipe, -fil-traite,
+  -diffusion-equipe, -reponse-membre, -annulation-abonnement ok ; tsc et eslint propres. Rien envoye en reel, aucun
+  essai contre le modele ni la base.
+- Mise en ligne : pousser master. Essai a faire : la demande de Melanie sur Agent AOK, fichier de 145 lignes attendu.
+
 ## AGENT AOK : RAPPROCHER UNE LISTE DE PERSONNES AVEC LEURS COMPTES TELEGRAM (21/11/2026, commite NON pousse, branche agent-listes ; aucune migration)
 
 - Cause (enquete du 21/11) : une capture d'environ 120 emails d'ex-membres envoyee par Melanie ; l'agent a ecrit son SQL a la
