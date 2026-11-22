@@ -771,7 +771,68 @@ export async function contenus(c: Ctx): Promise<Sortie> {
     lignes: annonces.length + decoupages.length + generations.length + videos.length,
     notes: [
       ...notes,
-      'Il n\'y a pas de planning éditorial en base : le picker hebdomadaire de Brice vit dans un artifact Claude, hors du cockpit. Les lives à venir se lisent dans les annonces.',
+      'Le calendrier éditorial (contenus prévus par jour, plateforme, qui poste, parti ou pas) se lit dans /contenus-prevus. Les lives à venir se lisent dans les annonces.',
+    ],
+  }
+}
+
+// ---------------------------------------------------------------------------
+// CONTENUS PREVUS (22/11/2026) : le calendrier editorial de l'Orchestre
+// Marketing, recopie dans cockpit_contenus par import_contenus.py. La vue
+// cockpit_contenus_etat dit si une collecte couvre chaque ligne (parti =
+// statut parti ou constate) ; cockpit_contenus_non_prevus = les publications
+// collectees sans ligne prevue. Repond a « combien demain, sur quoi ».
+// Par defaut : d'hier a J+8 (jours de Paris) ; ?du= / ?au= pour une autre plage.
+// ---------------------------------------------------------------------------
+
+export async function contenusPrevus(c: Ctx): Promise<Sortie> {
+  const { tx, params } = c
+  const notes: string[] = []
+  const du = params.get('du') ? c.periode.du : decalerJour(c.aujourdhui, -1)
+  const au = params.get('au') ? c.periode.au : decalerJour(c.aujourdhui, 8)
+  const qui = (params.get('qui') ?? '').trim().toLowerCase() || null
+  const plateforme = (params.get('plateforme') ?? '').trim().toLowerCase() || null
+  const lignes = await facultatif(notes, 'cockpit_contenus_etat', () => q<Record<string, unknown>>(tx, `
+    select id, ${D('date')} as jour, to_char(heure, 'HH24:MI') as heure, plateforme, format, titre, audience, produit, qui,
+      statut, go, coalesce(lien, lien_constate) as lien, ref, note, parti, constate, parti_par
+    from public.cockpit_contenus_etat
+    where date between $1::date and $2::date and statut <> 'annule'
+      and ($3::text is null or qui = $3) and ($4::text is null or plateforme = $4)
+    order by date, heure nulls last, id`, du, au, qui, plateforme))
+  const nonPrevus = await facultatif(notes, 'cockpit_contenus_non_prevus', () => q(tx, `
+    select ${D('jour')} as jour, plateforme, famille, ${H('publie_le')} as publie_le, lien, extrait
+    from public.cockpit_contenus_non_prevus
+    where jour between $1::date and $2::date and ($3::text is null or plateforme = $3)
+    order by publie_le`, du, au, plateforme))
+  const parJour = new Map<string, { jour: string; total: number; partis: number; pas_partis: number; attendent_ton_go: number; plateformes: Record<string, number> }>()
+  for (const l of lignes) {
+    const jour = String(l.jour)
+    const j = parJour.get(jour) ?? { jour, total: 0, partis: 0, pas_partis: 0, attendent_ton_go: 0, plateformes: {} }
+    j.total += 1
+    if (l.parti) j.partis += 1
+    else {
+      j.pas_partis += 1
+      if (l.go === 'attendu') j.attendent_ton_go += 1
+    }
+    const p = String(l.plateforme)
+    j.plateformes[p] = (j.plateformes[p] ?? 0) + 1
+    parJour.set(jour, j)
+  }
+  return {
+    libelle: `Contenus prévus du ${jourLisible(du)} au ${jourLisible(au)}${qui ? `, postés par ${qui}` : ''}`,
+    sources: ['cockpit_contenus (liste unique de l\'Orchestre Marketing)', 'cockpit_contenus_etat (rapprochement avec les collectes Instagram, YouTube, canal Telegram)', 'cockpit_contenus_non_prevus'],
+    donnees: {
+      aujourdhui: c.aujourdhui,
+      par_jour: [...parJour.values()],
+      contenus: lignes,
+      publications_non_prevues: nonPrevus,
+    },
+    lignes: lignes.length,
+    notes: [
+      ...notes,
+      'Une ligne par contenu ET par plateforme. statut : prevu, pret, programme, parti, annule (les annulés ne sont pas rendus). go : attendu (attend le go de Brice), donne, durable.',
+      'parti = statut parti dans la liste, posé par un agent (TikTok, sans collecte) ou par Kit, ou retrouvé par une collecte le même jour (constate = true). Les collectes Instagram et YouTube passent une fois par jour : le jour même peut être en retard.',
+      'Filtres : du, au (AAAA-MM-JJ), qui (orchestre, mel, brice, yume...), plateforme (tiktok, instagram, youtube, kit, live-club, canal...).',
     ],
   }
 }

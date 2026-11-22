@@ -5,7 +5,7 @@ import { aide } from '@/lib/tab/aide'
 import { connaissances, donnees, schema } from '@/lib/tab/generique'
 import {
   aFaire, avatars, contenus, depenseIA, encaissements, membres, paiements, personne, pubs, reseaux, resumeDuJour, support, youtube,
-  type Ctx, type Sortie,
+  type Ctx, type Sortie, contenusPrevus,
 } from '@/lib/tab/lectures'
 import { heureParisLisible, jourParis, lirePagination, lirePeriode, type DefautPeriode } from '@/lib/tab/pur'
 import { lireDemandeGeneration } from '@/lib/generation-pur'
@@ -77,6 +77,8 @@ const LECTURES: Record<string, Lecture> = {
   youtube: { f: youtube, defaut: '7j' },
   reseaux: { f: reseaux, defaut: '7j' },
   contenus: { f: contenus, defaut: 'semaine' },
+  // (22/11/2026) Le calendrier editorial : contenus prevus d'hier a J+8, parti ou pas, publications non prevues.
+  'contenus-prevus': { f: contenusPrevus, defaut: 'semaine' },
   personne: { f: personne, defaut: 'tout' },
   avatars: { f: avatars, defaut: 'tout' },
   connaissances: { f: connaissances, defaut: 'tout' },
