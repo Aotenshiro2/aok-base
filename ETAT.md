@@ -1,5 +1,23 @@
 # ETAT du journal d etudes
 
+## INDICATEUR D'ALEX : LE RETOUR D'UN MEMBRE (24/11/2026, commite NON pousse, branche bot-notification-reintegration depuis origin/master b54c374 ; aucune migration)
+
+- Carte du cockpit bot.notification_reintegration. Cas du 22/11 : une membre sortie pour un renouvellement rate, Alex
+  prevenu (« retire l'acces »), elle regle et revient, et rien ne disait a Alex de retablir.
+- Regles pures (indicateur-pur.ts) : decisionRetour (derniere demande fermee + droit relu 'oui' : depart pas encore dit
+  a Alex = annuler_depart, deja dit = retour), annonceAFaire genre 'retour' (demande pas encore transmise, depart d'avant
+  prevenu, pseudo parmi ceux retires), messageRetourAlex, ligne machine « #indicateur retour ... depart=AAAA-MM-JJ »,
+  ordreRetours (presents dans le groupe d'abord, sortis du passage ecartes, 20 h entre deux relectures).
+- Serveur (indicateur.ts) : retourIndicateur(telegramId) relit le droit, decide sous le verrou du compte (celui des
+  demandes), rouvre la demande (annulation, sans message) ou en ouvre une nouvelle (retour, meme pseudo), puis
+  transmettreDemande (meme reservation, meme envoi, meme reprise au passage suivant). Ne jette pas.
+- Declencheurs : entree dans le groupe (route du webhook, entreeVraie) ; passage, etape (2 bis) avant les departs (50
+  au plus, departs de moins de 30 jours, ou pas encore dits, ou compte present). Connecteur d'Alex : departs_indicateur
+  n'affiche plus un depart suivi d'une demande plus recente du meme compte.
+- A decider par Brice : la ligne machine « retour » doit etre connue du bot d'Alex ; un delai avant de dire un depart.
+- Verifs : verifier-indicateur-alex (20 blocs), -liveclub (66), -relais-accueil (13), tsc, eslint des fichiers touches :
+  ok. verifier-accueil-groupe echoue aussi sans ce chantier (texte de l'academie).
+
 ## AGENT AOK : LES LISTES EN FICHIER CSV, PLUS DE LISTE COUPEE PRESENTEE COMME COMPLETE (21/11/2026, commite NON pousse, branche agent-export-liste depuis origin/master 2c7bc69 ; aucune migration)
 
 - Cause : Melanie demande le contact de tous les resilies du Live Club (145 en base), l'agent en rend 58 puis 59.

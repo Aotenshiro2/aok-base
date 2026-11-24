@@ -30,6 +30,14 @@
 // (comptes sortis par ce passage d'abord, puis absents du groupe, puis les
 // plus anciennement relus, MAX_DROITS_PASSAGE au plus).
 //
+// LES RETOURS (24/11, Brice : « on retire l'acces a quelque chose qu'ils ont
+// juste parce qu'on ne fait pas la passation correctement ») : un compte dont
+// la derniere demande est fermee et dont le droit est relu 'oui' (a son
+// entree dans le groupe, route du webhook, ou par le passage) : depart pas
+// encore dit a Alex = la demande se rouvre sans message ; depart deja dit =
+// une nouvelle demande ouverte, et Alex recoit « retablis l'acces »
+// (retourIndicateur). Meme reservation, meme envoi, meme trace.
+//
 // INTERRUPTEUR : LIVECLUB_INDICATEUR=0 coupe les messages a Alex et la tache
 // du passage (les demandes restent notees « a transmettre »).
 //
@@ -43,12 +51,14 @@ import { envoyer, type Bouton } from './telegram'
 import { messageErreur, relationAbsente } from './pur'
 import { nomPropre, pseudoPropre } from './relais-pur'
 import {
-  MAX_DROITS_PASSAGE, MAX_ENVOIS_PASSAGE, TEXTE_ANNULE, TEXTE_BOUTON_PERIME, TEXTE_DROIT_ILLISIBLE, TEXTE_ETAPE,
+  MAX_DROITS_PASSAGE, MAX_ENVOIS_PASSAGE, MAX_RETOURS_PASSAGE, RETOUR_RECENT_JOURS, TEXTE_ANNULE, TEXTE_BOUTON_PERIME,
+  TEXTE_DROIT_ILLISIBLE, TEXTE_ETAPE,
   TEXTE_NON_MEMBRE, TEXTE_PANNE_INDICATEUR, TEXTE_PAS_ENCORE, TEXTE_PSEUDO_INVALIDE, TEXTE_RELANCE, TEXTE_RELANCE_CARTE,
-  TYPES_ETAPE_INDICATEUR, annonceAFaire, boutonsCarte, boutonsEtape, decisionDemande, estEtapeIndicateur, etapeExpiree,
-  issueDroit, lireEntreePseudo, messageChangementAlex, messageDemandeAlex, messageDepartAlex, nouvelleCarte, nouvelleEtape,
-  ordreVerification, pseudosARetirer, statutDemande, texteApres, texteCarte, texteEtapeDeja, textePresentationAlex,
-  type DecisionDemande, type EtapeIndicateur, type LigneAVerifier, type QuiPourAlex,
+  TYPES_ETAPE_INDICATEUR, annonceAFaire, boutonsCarte, boutonsEtape, decisionDemande, decisionRetour, estEtapeIndicateur,
+  etapeExpiree, issueDroit, lireEntreePseudo, messageChangementAlex, messageDemandeAlex, messageDepartAlex, messageRetourAlex,
+  nouvelleCarte, nouvelleEtape, ordreRetours, ordreVerification, pseudosARetirer, statutDemande, texteApres, texteCarte,
+  texteEtapeDeja, textePresentationAlex,
+  type DecisionDemande, type DepartPrecedent, type EtapeIndicateur, type LigneAVerifier, type LigneRetour, type QuiPourAlex,
 } from './indicateur-pur'
 
 /** LIVECLUB_INDICATEUR=0 coupe les messages a Alex et la tache du passage. */
@@ -200,6 +210,23 @@ type LigneEnvoi = {
 
 const quiDe = (l: LigneEnvoi): QuiPourAlex => ({ prenom: l.prenom, pseudoTelegram: l.pseudo_telegram, telegramId: Number(l.telegram_id) })
 
+/**
+ * (24/11) Le depart d'avant de ce compte, dont Alex a ete prevenu : la
+ * demande fermee la plus recente AVANT celle-ci. null s'il n'y en a pas, ou
+ * si Alex n'a jamais su ce depart. Jette sur une panne.
+ */
+async function lireDepartPrecedent(telegramId: number, demandeId: number): Promise<DepartPrecedent | null> {
+  const p = (await prisma.$queryRaw<{ pseudo_tradingview: string; pseudo_transmis: string | null; prevenu: boolean; jour: string }[]>`
+    select pseudo_tradingview, pseudo_transmis, (prevenu_depart_le is not null) as prevenu,
+      to_char(depart_le at time zone 'Europe/Paris', 'YYYY-MM-DD') as jour
+    from public.cockpit_liveclub_indicateur
+    where telegram_id = ${telegramId} and demande_id < ${demandeId} and depart_le is not null
+    order by demande_id desc
+    limit 1`)[0]
+  if (!p || !p.prevenu) return null
+  return { pseudos: pseudosARetirer({ pseudo: p.pseudo_tradingview, pseudoTransmis: p.pseudo_transmis }), departLe: p.jour }
+}
+
 export type IssueEnvoi = 'envoye' | 'rien' | 'echec' | 'sans_destinataire' | 'coupe'
 
 /**
@@ -221,14 +248,18 @@ export async function transmettreDemande(demandeId: number): Promise<IssueEnvoi>
         to_char(demande_le at time zone 'Europe/Paris', 'YYYY-MM-DD') as demande_le,
         to_char(now() at time zone 'Europe/Paris', 'YYYY-MM-DD') as jour`)[0]
     if (!l) return 'rien'
-    const annonce = annonceAFaire({ pseudo: l.pseudo_tradingview, pseudoTransmis: l.pseudo_transmis, departLe: null })
+    // (24/11) Rien encore chez Alex pour cette demande : un depart d'avant, dont il a ete prevenu, en fait un RETOUR.
+    const departPrecedent = l.pseudo_transmis ? null : await lireDepartPrecedent(Number(l.telegram_id), demandeId)
+    const annonce = annonceAFaire({ pseudo: l.pseudo_tradingview, pseudoTransmis: l.pseudo_transmis, departLe: null, departPrecedent })
     if (!annonce) {
       await prisma.$executeRaw`update public.cockpit_liveclub_indicateur set envoi_reserve_le = null where demande_id = ${demandeId}`
       return 'rien'
     }
     const corps = annonce.genre === 'demande'
       ? messageDemandeAlex(quiDe(l), l.pseudo_tradingview, l.demande_le)
-      : messageChangementAlex(quiDe(l), annonce.ancien, l.pseudo_tradingview, l.jour)
+      : annonce.genre === 'retour'
+        ? messageRetourAlex(quiDe(l), l.pseudo_tradingview, l.jour, annonce.departLe)
+        : messageChangementAlex(quiDe(l), annonce.ancien, l.pseudo_tradingview, l.jour)
     const texte = (await dejaPresente()) ? corps : `${textePresentationAlex(dest.nom)}\n\n${corps}`
     const r = await envoyer(dest.telegramId, texte, undefined, { html: true })
     if (!r.ok) {
@@ -334,6 +365,104 @@ async function departDepuisLeBot(demandeId: number): Promise<void> {
     if (await marquerDepart(demandeId)) await prevenirDepart(demandeId)
   } catch (err) {
     console.warn(`[liveclub/indicateur] depart non note : ${messageErreur(err).slice(0, 160)}`)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Les retours (24/11, carte du cockpit bot.notification_reintegration)
+// ---------------------------------------------------------------------------
+
+/**
+ * retour : nouvelle demande ouverte, message « retablis l'acces » ;
+ * depart_annule : Alex n'avait pas ete prevenu, la demande se rouvre sans
+ * message ; rien : pas de demande fermee, une demande deja ouverte, ou un
+ * depart en cours d'envoi (le passage suivant fera le retour) ; non_membre,
+ * inconnu : le droit relu ne permet rien.
+ */
+export type IssueRetour = 'retour' | 'depart_annule' | 'rien' | 'non_membre' | 'inconnu' | 'coupe' | 'table_absente' | 'panne'
+
+type Derniere = {
+  demande_id: bigint; membre_id: string | null; prenom: string | null; pseudo_telegram: string | null
+  pseudo_tradingview: string; depart_le: Date | null; prevenu_depart_le: Date | null
+}
+
+const versDecision = (d: Derniere | undefined) => ({
+  ouverte: !!d && !d.depart_le,
+  derniere: d ? { departLe: d.depart_le?.toISOString() ?? null, prevenuDepartLe: d.prevenu_depart_le?.toISOString() ?? null } : null,
+})
+
+/**
+ * (24/11) Un compte redevient membre du Live Club (entree dans le groupe, ou
+ * droit relu 'oui' par le passage) : si sa DERNIERE demande d'indicateur est
+ * fermee, le depart s'annule (Alex pas encore prevenu) ou un RETOUR part chez
+ * Alex (« retablis l'acces »). Le droit est relu juste avant d'agir (ou
+ * passe par le passage, qui vient de le lire), la decision est reprise sous
+ * le verrou du compte (celui des demandes) : deux evenements simultanes ne
+ * font qu'un retour, et l'index unique des demandes ouvertes le garantit en
+ * base. Ne jette pas : un relais injoignable laisse la demande « a
+ * transmettre », le passage suivant reessaie.
+ */
+export async function retourIndicateur(
+  telegramId: number,
+  o: { droit?: Awaited<ReturnType<typeof droitLiveClub>> } = {},
+): Promise<{ issue: IssueRetour; envoi?: IssueEnvoi }> {
+  if (!indicateurActif()) return { issue: 'coupe' }
+  if (!Number.isSafeInteger(telegramId) || telegramId <= 0) return { issue: 'rien' }
+  try {
+    // Sans verrou d'abord : la plupart des comptes n'ont aucune demande fermee, aucun droit n'est relu pour eux.
+    const avant = (await prisma.$queryRaw<Derniere[]>`
+      select demande_id, membre_id::text as membre_id, prenom, pseudo_telegram, pseudo_tradingview, depart_le, prevenu_depart_le
+      from public.cockpit_liveclub_indicateur
+      where telegram_id = ${telegramId}
+      order by demande_id desc
+      limit 1`)[0]
+    if (decisionRetour(versDecision(avant)) === 'rien' || !avant) return { issue: 'rien' }
+    const droit = o.droit ?? await droitLiveClub(telegramId)
+    if (droit.statut === 'inconnu') return { issue: 'inconnu' }
+    if (droit.statut === 'non') {
+      await prisma.$executeRaw`update public.cockpit_liveclub_indicateur set droit_verifie_le = now() where demande_id = ${avant.demande_id}`
+      return { issue: 'non_membre' }
+    }
+    const fait = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        select count(*)::int as n from (select pg_advisory_xact_lock(hashtextextended(${`liveclub:indicateur:${telegramId}`}::text, 0))) as verrou`
+      const d = (await tx.$queryRaw<Derniere[]>`
+        select demande_id, membre_id::text as membre_id, prenom, pseudo_telegram, pseudo_tradingview, depart_le, prevenu_depart_le
+        from public.cockpit_liveclub_indicateur
+        where telegram_id = ${telegramId}
+        order by demande_id desc
+        limit 1 for update`)[0]
+      const decision = decisionRetour(versDecision(d))
+      if (!d || decision === 'rien') return null
+      if (decision === 'annuler_depart') {
+        // Alex n'a rien su : la demande se rouvre, sauf si le message de depart est en train de partir.
+        const n = await tx.$executeRaw`
+          update public.cockpit_liveclub_indicateur set
+            depart_le = null, droit_verifie_le = now(), maj_le = now(),
+            statut = case when pseudo_transmis is not null and lower(pseudo_transmis) = lower(pseudo_tradingview)
+                          then 'transmise' else 'a_transmettre' end
+          where demande_id = ${d.demande_id} and depart_le is not null and prevenu_depart_le is null
+            and (envoi_reserve_le is null or envoi_reserve_le < now() - make_interval(mins => ${RESERVATION_PERIMEE_MIN}::int))`
+        return n > 0 ? { issue: 'depart_annule' as const, demandeId: Number(d.demande_id) } : null
+      }
+      // Retour : une nouvelle demande ouverte, le meme pseudo, ce qu'Alex connait de lui (prenom, @).
+      const [n] = await tx.$queryRaw<{ demande_id: bigint }[]>`
+        insert into public.cockpit_liveclub_indicateur
+          (telegram_id, membre_id, prenom, pseudo_telegram, pseudo_tradingview, statut, droit_verifie_le)
+        values (${telegramId}, ${droit.membreId ?? d.membre_id}::uuid, ${d.prenom}, ${d.pseudo_telegram},
+                ${d.pseudo_tradingview}, 'a_transmettre', now())
+        returning demande_id`
+      return { issue: 'retour' as const, demandeId: Number(n.demande_id) }
+    })
+    if (!fait) return { issue: 'rien' }
+    // Le message (retour, ou ce qu'une demande rouverte attendait encore) : il part, ou le passage reessaie.
+    const envoi = await transmettreDemande(fait.demandeId)
+    console.log(`[liveclub/indicateur] ${fait.issue === 'retour' ? 'retour' : 'depart annule'}, message : ${envoi}`)
+    return { issue: fait.issue, envoi }
+  } catch (err) {
+    if (migrationAbsente(err)) return { issue: 'table_absente' }
+    console.warn(`[liveclub/indicateur] retour non traite : ${messageErreur(err).slice(0, 160)}`)
+    return { issue: 'panne' }
   }
 }
 
@@ -486,9 +615,15 @@ export type BilanIndicateur = {
   inconnus: number
   /** Messages refuses par Telegram (gardes, reessayes au passage suivant). */
   echecs: number
+  /** (24/11) Retours notes (nouvelle demande ouverte apres un depart dit a Alex). */
+  retours?: number
+  /** (24/11) Departs annules avant d'etre dits a Alex (le membre est revenu entre-temps). */
+  departsAnnules?: number
 }
 
-const bilanVide = (etat: string): BilanIndicateur => ({ etat, transmises: 0, departs: 0, prevenus: 0, verifies: 0, inconnus: 0, echecs: 0 })
+const bilanVide = (etat: string): BilanIndicateur => ({
+  etat, transmises: 0, departs: 0, prevenus: 0, verifies: 0, inconnus: 0, echecs: 0, retours: 0, departsAnnules: 0,
+})
 
 /**
  * Pour le passage quotidien, apres les sorties du jour : (1) les messages qui
@@ -509,6 +644,8 @@ export async function tacheIndicateur(o: { sortis: ReadonlySet<number>; tempsEco
       order by maj_le, demande_id
       limit ${MAX_ENVOIS_PASSAGE}`
     const vus = new Set<number>()
+    // (24/11) Les comptes dont le droit vient d'etre lu 'non' : pas relus pour un retour dans ce passage.
+    const partis = new Set<number>(o.sortis)
     for (const l of attente) {
       if (o.tempsEcoule()) break
       const id = Number(l.demande_id)
@@ -517,6 +654,7 @@ export async function tacheIndicateur(o: { sortis: ReadonlySet<number>; tempsEco
       const issue = issueDroit(droit.statut)
       if (issue === 'inconnu') { b.inconnus++; continue }
       if (issue === 'depart') {
+        partis.add(Number(l.telegram_id))
         if (await marquerDepart(id)) b.departs++
         continue
       }
@@ -545,12 +683,42 @@ export async function tacheIndicateur(o: { sortis: ReadonlySet<number>; tempsEco
       if (o.tempsEcoule()) break
       const issue = issueDroit((await droitLiveClub(l.telegramId)).statut)
       if (issue === 'depart') {
+        partis.add(l.telegramId)
         if (await marquerDepart(l.demandeId)) b.departs++
         continue
       }
       await prisma.$executeRaw`update public.cockpit_liveclub_indicateur set droit_verifie_le = now() where demande_id = ${l.demandeId}`
       if (issue === 'garde') b.verifies++
       else b.inconnus++
+    }
+
+    // (2 bis) (24/11) Les retours : comptes dont la DERNIERE demande est fermee, revenus dans le groupe d'abord,
+    // puis departs recents ou pas encore dits a Alex. Droit relu juste avant, 'oui' = retour (ou depart annule).
+    // L'entree dans le groupe le fait deja tout de suite (route du webhook) : ici, le filet.
+    const fermees = await prisma.$queryRaw<{ telegram_id: bigint; present: boolean | null; droit_verifie_le: Date | null; depart_le: Date }[]>`
+      select d.telegram_id, tm.present, d.droit_verifie_le, d.depart_le
+      from (select distinct on (telegram_id) telegram_id, depart_le, prevenu_depart_le, droit_verifie_le
+            from public.cockpit_liveclub_indicateur
+            order by telegram_id, demande_id desc) d
+      left join public.cockpit_telegram_membres tm on tm.telegram_id = d.telegram_id
+      where d.depart_le is not null
+        and (tm.present is true or d.prevenu_depart_le is null
+             or d.depart_le > now() - make_interval(days => ${RETOUR_RECENT_JOURS}::int))
+      limit 2000`
+    const aRelire: LigneRetour[] = fermees.map(l => ({
+      telegramId: Number(l.telegram_id), present: l.present,
+      droitVerifieLe: l.droit_verifie_le?.toISOString() ?? null, departLe: l.depart_le.toISOString(),
+    }))
+    for (const l of ordreRetours(aRelire, { exclus: partis, max: MAX_RETOURS_PASSAGE, maintenant })) {
+      if (o.tempsEcoule()) break
+      const droit = await droitLiveClub(l.telegramId)
+      const r = await retourIndicateur(l.telegramId, { droit })
+      if (r.issue === 'retour') b.retours = (b.retours ?? 0) + 1
+      else if (r.issue === 'depart_annule') b.departsAnnules = (b.departsAnnules ?? 0) + 1
+      else if (r.issue === 'inconnu') b.inconnus++
+      if (r.envoi === 'envoye') b.transmises++
+      else if (r.envoi === 'echec') b.echecs++
+      else if (r.envoi === 'sans_destinataire') b.etat = 'sans_destinataire'
     }
 
     // (3) Les departs a dire a Alex (ceux de ce passage, et ceux qu'un refus de Telegram a gardes).
@@ -570,6 +738,6 @@ export async function tacheIndicateur(o: { sortis: ReadonlySet<number>; tempsEco
     console.warn(`[liveclub/indicateur] passage interrompu : ${messageErreur(err).slice(0, 200)}`)
     return { ...b, etat: 'panne' }
   }
-  console.log(`[liveclub/indicateur] ${b.transmises} transmise(s), ${b.departs} depart(s), ${b.prevenus} prevenu(s), ${b.verifies} droit(s) relu(s), ${b.inconnus} inconnu(s), ${b.echecs} echec(s)`)
+  console.log(`[liveclub/indicateur] ${b.transmises} transmise(s), ${b.departs} depart(s), ${b.prevenus} prevenu(s), ${b.retours ?? 0} retour(s), ${b.departsAnnules ?? 0} depart(s) annule(s), ${b.verifies} droit(s) relu(s), ${b.inconnus} inconnu(s), ${b.echecs} echec(s)`)
   return b
 }

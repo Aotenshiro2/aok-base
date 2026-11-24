@@ -72,8 +72,11 @@ export const lecturesAlex: Lectures = {
     const lignes = await prisma.$queryRaw<{ prenom: string | null; pseudo_telegram: string | null; pseudo_tradingview: string; pseudo_transmis: string | null; depart_le: string }[]>`
       select prenom, pseudo_telegram, pseudo_tradingview, pseudo_transmis,
         to_char(depart_le at time zone 'Europe/Paris', 'YYYY-MM-DD') as depart_le
-      from public.cockpit_liveclub_indicateur
+      from public.cockpit_liveclub_indicateur i
       where depart_le is not null and (depart_le at time zone 'Europe/Paris')::date >= ${depuis}::date
+        -- (24/11) Un depart suivi d'une demande plus recente du meme compte (retour, ou nouvelle demande) ne se retire plus.
+        and not exists (select 1 from public.cockpit_liveclub_indicateur s
+                        where s.telegram_id = i.telegram_id and s.demande_id > i.demande_id)
       order by depart_le, demande_id
       limit ${max}`
     return lignes.map((l) => ({

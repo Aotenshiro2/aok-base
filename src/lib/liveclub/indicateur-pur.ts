@@ -40,8 +40,10 @@
 // Les messages a Alex (relais d'accueil qui porte cockpit_liveclub_relais.
 // indicateur, actif), dans SA conversation avec le bot des membres : une
 // demande, un pseudo change, un depart (« X a quitte le Live Club : retire
-// l'acces de <pseudo> »), une fois chacun, chacun avec une ligne #indicateur
-// lisible par une machine. Jamais d'email, d'abonnement ni de paiement.
+// l'acces de <pseudo> »), un retour (24/11 : « X est de nouveau membre du Live
+// Club : retablis l'acces de <pseudo> »), une fois chacun, chacun avec une
+// ligne #indicateur lisible par une machine. Jamais d'email, d'abonnement ni
+// de paiement.
 
 import { echapperHtml, nomPropre, pseudoPropre } from './relais-pur'
 
@@ -198,19 +200,99 @@ export function decisionDemande(ouverte: { pseudo: string } | null, pseudo: stri
   return memePseudo(ouverte.pseudo, pseudo) ? 'identique' : 'changement'
 }
 
-export type EtatDemande = { pseudo: string; pseudoTransmis: string | null; departLe: string | null }
+/**
+ * Le depart PRECEDENT de ce compte, dont Alex a ete prevenu (la demande
+ * fermee juste avant, prevenu_depart_le pose) : `pseudos` = ceux qu'il a
+ * retires (pseudosARetirer), `departLe` = le jour du depart, AAAA-MM-JJ.
+ */
+export type DepartPrecedent = { pseudos: readonly string[]; departLe: string }
 
-export type Annonce = { genre: 'demande' } | { genre: 'changement'; ancien: string }
+export type EtatDemande = {
+  pseudo: string; pseudoTransmis: string | null; departLe: string | null
+  /** (24/11) Le depart d'avant, dit a Alex : une demande qui le suit est un RETOUR. */
+  departPrecedent?: DepartPrecedent | null
+}
+
+export type Annonce =
+  | { genre: 'demande' }
+  | { genre: 'changement'; ancien: string }
+  | { genre: 'retour'; departLe: string }
 
 /**
  * Le message qui attend de partir chez Alex : aucun si la demande est partie
  * ou si Alex a deja le pseudo actuel ; une demande s'il n'a encore rien recu ;
- * un changement s'il a un autre pseudo.
+ * un changement s'il a un autre pseudo. (24/11) Un RETOUR si Alex n'a encore
+ * rien recu pour cette demande, qu'il a ete prevenu du depart d'avant, et que
+ * le pseudo est l'un de ceux qu'il a retires : il doit le RETABLIR.
  */
 export function annonceAFaire(e: EtatDemande): Annonce | null {
   if (e.departLe) return null
-  if (!e.pseudoTransmis) return { genre: 'demande' }
+  if (!e.pseudoTransmis) {
+    const p = e.departPrecedent
+    return p && p.pseudos.some(x => memePseudo(x, e.pseudo)) ? { genre: 'retour', departLe: p.departLe } : { genre: 'demande' }
+  }
   return memePseudo(e.pseudoTransmis, e.pseudo) ? null : { genre: 'changement', ancien: e.pseudoTransmis }
+}
+
+/**
+ * (24/11, Brice : « on retire l'acces a quelque chose qu'ils ont juste parce
+ * qu'on ne fait pas la passation correctement ») Un compte dont la DERNIERE
+ * demande est fermee, et dont le droit au Live Club est relu 'oui' :
+ * - aucune demande fermee, ou une demande ouverte : rien (un tout premier
+ *   arrivant suit le parcours habituel, le bouton) ;
+ * - depart pas encore dit a Alex : le depart s'ANNULE (la demande se rouvre,
+ *   Alex ne recoit rien, il n'a jamais rien su) ;
+ * - depart deja dit a Alex : RETOUR (une nouvelle demande ouverte, meme
+ *   pseudo, et Alex recoit « retablis l'acces »).
+ * Une seule demande ouverte par compte (index unique) : un second evenement
+ * trouve la demande ouverte et ne fait rien.
+ */
+export type DecisionRetour = 'rien' | 'annuler_depart' | 'retour'
+
+export function decisionRetour(e: {
+  ouverte: boolean
+  derniere: { departLe: string | null; prevenuDepartLe: string | null } | null
+}): DecisionRetour {
+  if (e.ouverte || !e.derniere || !e.derniere.departLe) return 'rien'
+  return e.derniere.prevenuDepartLe ? 'retour' : 'annuler_depart'
+}
+
+/** Un depart plus ancien n'est relu par le passage que si le compte est dans le groupe. */
+export const RETOUR_RECENT_JOURS = 30
+
+/** Au plus, par passage : droits des comptes partis relus pour un retour. */
+export const MAX_RETOURS_PASSAGE = 50
+
+export type LigneRetour = {
+  telegramId: number
+  /** cockpit_telegram_membres.present (null : compte inconnu du registre). */
+  present: boolean | null
+  droitVerifieLe: string | null
+  departLe: string
+}
+
+/**
+ * Les comptes partis dont le passage relit le droit pour un retour : ceux
+ * revenus dans le groupe d'abord (present), puis les jamais relus, puis les
+ * plus anciennement relus. Un droit relu depuis moins de RELECTURE_MIN_HEURES
+ * attend, sauf compte present. Les comptes sortis par CE passage sont ecartes
+ * (`exclus`) : leur droit vient d'etre lu 'non'. `max` au plus.
+ */
+export function ordreRetours(
+  lignes: readonly LigneRetour[],
+  o: { exclus: ReadonlySet<number>; max: number; maintenant: number },
+): LigneRetour[] {
+  const recent = (l: LigneRetour) => !!l.droitVerifieLe
+    && o.maintenant - Date.parse(l.droitVerifieLe) < RELECTURE_MIN_HEURES * 3_600_000
+  const rang = (l: LigneRetour) => (l.present === true ? 0 : 1)
+  return lignes
+    .filter(l => !o.exclus.has(l.telegramId) && (rang(l) === 0 || !recent(l)))
+    .sort((a, b) => rang(a) - rang(b)
+      || (a.droitVerifieLe ? 1 : 0) - (b.droitVerifieLe ? 1 : 0)
+      || (a.droitVerifieLe ?? '').localeCompare(b.droitVerifieLe ?? '')
+      || b.departLe.localeCompare(a.departLe)
+      || a.telegramId - b.telegramId)
+    .slice(0, Math.max(0, o.max))
 }
 
 /** Le statut en base, deduit de l'etat. */
@@ -354,7 +436,11 @@ function quiHtml(q: QuiPourAlex): string {
 }
 
 /** La ligne lisible par une machine : #indicateur <genre> cle=valeur... (ASCII, pseudos au format strict). */
-export function ligneMachine(genre: 'demande' | 'changement' | 'depart', q: QuiPourAlex, champs: { tv: string[]; ancien?: string | null; le: string }): string {
+export function ligneMachine(
+  genre: 'demande' | 'changement' | 'depart' | 'retour',
+  q: QuiPourAlex,
+  champs: { tv: string[]; ancien?: string | null; le: string; depart?: string | null },
+): string {
   const at = pseudoPropre(q.pseudoTelegram)
   const prenom = (nomPropre(q.prenom, 40) ?? '').replace(/"/g, '')
   return [
@@ -364,6 +450,7 @@ export function ligneMachine(genre: 'demande' | 'changement' | 'depart', q: QuiP
     `tg=${at ? `@${at}` : `id:${Math.trunc(q.telegramId)}`}`,
     `prenom="${echapperHtml(prenom)}"`,
     `le=${champs.le.slice(0, 10)}`,
+    ...(champs.depart ? [`depart=${champs.depart.slice(0, 10)}`] : []),
   ].join(' ')
 }
 
@@ -371,7 +458,7 @@ export function ligneMachine(genre: 'demande' | 'changement' | 'depart', q: QuiP
 export function textePresentationAlex(nom: string): string {
   const p = nomPropre(nom, 30)
   return `Salut${p ? ` ${echapperHtml(p)}` : ''}, comme convenu avec Brice : quand un membre du Live Club demande ton indicateur, `
-    + `je t'envoie ici son prénom, son @ et son pseudo TradingView. Quand un membre quitte le Live Club, je te dis quel accès retirer. `
+    + `je t'envoie ici son prénom, son @ et son pseudo TradingView. Quand un membre quitte le Live Club, je te dis quel accès retirer, et quel accès rétablir s'il revient. `
     + 'Chaque message finit par une ligne #indicateur, lisible par une machine.'
 }
 
@@ -404,6 +491,21 @@ export function messageDepartAlex(q: QuiPourAlex, pseudos: readonly string[], le
     `${quiHtml(q)} a quitté le Live Club : retire l'accès de ${liste} à l'indicateur.`,
     '',
     ligneMachine('depart', q, { tv: [...pseudos], le }),
+  ].join('\n')
+}
+
+/**
+ * (c) Un RETOUR (24/11) : le membre dont Alex a recu le depart est de nouveau
+ * membre du Live Club, il faut lui RETABLIR l'acces. `le` : le jour du retour ;
+ * `departLe` : le jour du depart qu'il annule (les deux AAAA-MM-JJ).
+ */
+export function messageRetourAlex(q: QuiPourAlex, pseudo: string, le: string, departLe: string): string {
+  return [
+    'Indicateur : retour d\'un membre',
+    `${quiHtml(q)} est de nouveau membre du Live Club : rétablis l'accès de ${pseudo} à l'indicateur.`,
+    `Ça annule le départ du ${dateFr(departLe)}.`,
+    '',
+    ligneMachine('retour', q, { tv: [pseudo], le, depart: departLe }),
   ].join('\n')
 }
 

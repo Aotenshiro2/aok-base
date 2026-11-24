@@ -252,6 +252,193 @@ await bloc('idempotence du depart : droit non = depart, une fois, Alex prevenu u
   assert.ok(!/abonnementsLiveClub|listerAbonnements|stripe/i.test(SERVEUR_INDIC.replace(/\/\/.*$/gm, '')), 'pas de lecture Stripe a part')
 })
 
+// (24/11) Le RETOUR (carte du cockpit bot.notification_reintegration) : un registre factice qui applique
+// les regles du serveur (retourIndicateur, transmettreDemande, prevenirDepart) a un compte, demande par demande.
+function registreRetour() {
+  const alex = []
+  const lignes = [] // { id, pseudo, pseudoTransmis, departLe, prevenuDepartLe }
+  const derniere = () => lignes.at(-1) ?? null
+  const precedent = (l) => {
+    const p = lignes.filter((x) => x.id < l.id && x.departLe).at(-1)
+    return p && p.prevenuDepartLe ? { pseudos: I.pseudosARetirer(p), departLe: p.departLe } : null
+  }
+  const r = {
+    alex, lignes,
+    demander(pseudo) {
+      const o = derniere() && !derniere().departLe ? derniere() : null
+      if (!o) lignes.push({ id: lignes.length + 1, pseudo, pseudoTransmis: null, departLe: null, prevenuDepartLe: null })
+      else if (I.decisionDemande(o, pseudo) !== 'identique') o.pseudo = pseudo
+    },
+    // transmettreDemande : la demande ouverte, ce qu'Alex doit recevoir ; ok = false : relais injoignable.
+    envoyer(ok = true, le = '2026-11-22') {
+      const o = derniere()
+      if (!o || o.departLe) return null
+      const a = I.annonceAFaire({ ...o, departPrecedent: o.pseudoTransmis ? null : precedent(o) })
+      if (!a || !ok) return a
+      alex.push(a.genre === 'retour' ? `retour ${o.pseudo} (depart du ${a.departLe}) le ${le}` : a.genre === 'demande' ? `demande ${o.pseudo}` : `changement ${a.ancien} -> ${o.pseudo}`)
+      o.pseudoTransmis = o.pseudo
+      return a
+    },
+    // marquerDepart puis prevenirDepart (ok = false : Telegram refuse, le depart reste a prevenir).
+    partir(le, ok = true) {
+      const o = derniere()
+      if (o && !o.departLe) o.departLe = le
+      r.prevenir(ok)
+    },
+    prevenir(ok = true) {
+      const o = derniere()
+      if (!o || !I.departAPrevenir(o) || !ok) return
+      alex.push(`depart ${I.pseudosARetirer(o).join(',')}`)
+      o.prevenuDepartLe = o.departLe
+    },
+    // retourIndicateur, droit relu 'oui' : la decision, puis l'envoi.
+    revenir(ok = true, le = '2026-11-22') {
+      const d = derniere()
+      const decision = I.decisionRetour({ ouverte: !!d && !d.departLe, derniere: d })
+      if (decision === 'annuler_depart') d.departLe = null
+      if (decision === 'retour') lignes.push({ id: lignes.length + 1, pseudo: d.pseudo, pseudoTransmis: null, departLe: null, prevenuDepartLe: null })
+      if (decision !== 'rien') r.envoyer(ok, le)
+      return decision
+    },
+  }
+  return r
+}
+
+await bloc('retour : depart puis retour, retour en double, relais injoignable, premier arrivant', () => {
+  // 1. Le cas du 22/11 : sortie (renouvellement rate), Alex prevenu, puis retour : Alex recoit « retablis ».
+  const a = registreRetour()
+  a.demander('julien_trades')
+  a.envoyer()
+  a.partir('2026-11-22')
+  assert.deepEqual(a.alex, ['demande julien_trades', 'depart julien_trades'])
+  assert.equal(a.revenir(), 'retour')
+  assert.deepEqual(a.alex.at(-1), 'retour julien_trades (depart du 2026-11-22) le 2026-11-22')
+  assert.equal(I.statutDemande(a.lignes.at(-1)), 'transmise')
+  // 2. Le meme retour arrive deux fois (entree dans le groupe ET passage, ou update rejoue) : un seul message.
+  assert.equal(a.revenir(), 'rien')
+  a.envoyer()
+  assert.equal(a.alex.filter((x) => x.startsWith('retour')).length, 1, 'une seule notification par retour')
+  // Et un nouveau depart apres le retour se dit normalement, une fois.
+  a.partir('2026-12-01')
+  a.prevenir()
+  assert.deepEqual(a.alex.filter((x) => x.startsWith('depart')), ['depart julien_trades', 'depart julien_trades'])
+  assert.equal(a.revenir(), 'retour')
+  assert.match(a.alex.at(-1), /depart du 2026-12-01/)
+
+  // 3. Relais injoignable au retour : rien n'est perdu, la demande reste a transmettre, le passage suivant l'envoie une fois.
+  const b = registreRetour()
+  b.demander('jt_1')
+  b.envoyer()
+  b.partir('2026-11-22')
+  assert.equal(b.revenir(false), 'retour')
+  assert.deepEqual(b.alex, ['demande jt_1', 'depart jt_1'], 'refus de Telegram : rien chez Alex')
+  assert.equal(I.statutDemande(b.lignes.at(-1)), 'a_transmettre', 'gardee a transmettre')
+  assert.equal(b.revenir(), 'rien', 'la demande ouverte suffit : pas de seconde ligne')
+  assert.equal(b.lignes.length, 2)
+  assert.equal(b.envoyer()?.genre, 'retour')
+  assert.equal(b.envoyer(), null)
+  assert.equal(b.alex.filter((x) => x.startsWith('retour')).length, 1)
+
+  // 4. Sortie puis retour AVANT qu'Alex ne soit prevenu (Telegram avait refuse le depart) : le depart s'annule,
+  // Alex ne recoit ni depart ni retour, et le depart n'est plus a prevenir.
+  const c = registreRetour()
+  c.demander('jt_2')
+  c.envoyer()
+  c.partir('2026-11-22', false)
+  assert.equal(I.departAPrevenir(c.lignes.at(-1)), true)
+  assert.equal(c.revenir(), 'annuler_depart')
+  c.prevenir()
+  assert.deepEqual(c.alex, ['demande jt_2'], 'Alex ne sait rien du depart annule')
+  assert.equal(I.statutDemande(c.lignes.at(-1)), 'transmise')
+  assert.equal(c.lignes.length, 1)
+
+  // 5. Un tout premier arrivant (aucune demande) et un membre jamais sorti : rien, pas de second accueil chez Alex.
+  assert.equal(I.decisionRetour({ ouverte: false, derniere: null }), 'rien')
+  assert.equal(I.decisionRetour({ ouverte: true, derniere: { departLe: null, prevenuDepartLe: null } }), 'rien')
+  const e = registreRetour()
+  assert.equal(e.revenir(), 'rien')
+  e.demander('neuf_1')
+  assert.equal(e.revenir(), 'rien')
+  assert.equal(e.envoyer()?.genre, 'demande', 'un premier arrivant suit le parcours habituel')
+
+  // 6. Apres un depart, une demande par le bouton : meme pseudo = retour ; autre pseudo = nouvelle demande.
+  assert.deepEqual(I.annonceAFaire({ pseudo: 'JT_1', pseudoTransmis: null, departLe: null, departPrecedent: { pseudos: ['jt_1'], departLe: '2026-11-22' } }), { genre: 'retour', departLe: '2026-11-22' })
+  assert.deepEqual(I.annonceAFaire({ pseudo: 'autre', pseudoTransmis: null, departLe: null, departPrecedent: { pseudos: ['jt_1'], departLe: '2026-11-22' } }), { genre: 'demande' })
+  assert.deepEqual(I.annonceAFaire({ pseudo: 'jt_1', pseudoTransmis: null, departLe: null, departPrecedent: null }), { genre: 'demande' })
+  assert.deepEqual(I.annonceAFaire({ pseudo: 'jt_1', pseudoTransmis: 'jt_1', departLe: null, departPrecedent: { pseudos: ['jt_1'], departLe: '2026-11-22' } }), null)
+
+  // 7. L'ordre du passage : revenus dans le groupe d'abord, les sortis de ce passage ecartes, relecture bornee.
+  const t = Date.parse('2026-11-24T07:00:00Z')
+  const l = (tid, o = {}) => ({ telegramId: tid, present: false, droitVerifieLe: null, departLe: '2026-11-20T07:00:00Z', ...o })
+  const lignes = [
+    l(1, { droitVerifieLe: '2026-11-24T06:00:00Z' }), // relu il y a une heure, absent : attend
+    l(2, { present: true, droitVerifieLe: '2026-11-24T06:30:00Z' }), // revenu dans le groupe : relu quand meme, en tete
+    l(3),
+    l(4, { droitVerifieLe: '2026-11-22T06:00:00Z' }),
+    l(5, { present: true }), // sorti par ce passage : ecarte
+  ]
+  assert.deepEqual(I.ordreRetours(lignes, { exclus: new Set([5]), max: 10, maintenant: t }).map((x) => x.telegramId), [2, 3, 4])
+  assert.deepEqual(I.ordreRetours(lignes, { exclus: new Set(), max: 2, maintenant: t }).map((x) => x.telegramId), [5, 2])
+  assert.ok(I.MAX_RETOURS_PASSAGE > 0 && I.MAX_RETOURS_PASSAGE <= 60 && I.RETOUR_RECENT_JOURS > 0)
+})
+
+await bloc('retour : le serveur relit le droit, decide sous verrou, ne jette pas ; webhook, passage, connecteur', () => {
+  const rt = entre(SERVEUR_INDIC, 'export async function retourIndicateur(', '// ---------------------------------------------------------------------------\n// Le parcours du membre')
+  // Le droit relu (la regle du groupe) avant toute ecriture ; 'inconnu' et 'non' ne creent rien.
+  assert.ok(rt.indexOf('droitLiveClub(telegramId)') < rt.indexOf('prisma.$transaction('))
+  assert.match(rt, /if \(droit\.statut === 'inconnu'\) return \{ issue: 'inconnu' \}/)
+  assert.match(rt, /if \(droit\.statut === 'non'\) \{[\s\S]+?return \{ issue: 'non_membre' \}/)
+  // La decision reprise sous le verrou du compte (celui des demandes), la ligne verrouillee.
+  assert.ok(rt.indexOf('pg_advisory_xact_lock') < rt.indexOf('for update') && rt.indexOf('for update') < rt.lastIndexOf('decisionRetour('))
+  assert.match(rt, /`liveclub:indicateur:\$\{telegramId\}`/)
+  assert.match(SERVEUR_INDIC, /`liveclub:indicateur:\$\{telegramId\}`[\s\S]+`liveclub:indicateur:\$\{telegramId\}`/)
+  // Le depart ne s'annule que s'il n'est ni dit a Alex ni en train de partir.
+  assert.match(rt, /and depart_le is not null and prevenu_depart_le is null\n\s+and \(envoi_reserve_le is null or envoi_reserve_le < now\(\) - make_interval/)
+  // Le message passe par transmettreDemande : meme reservation, meme envoi, meme trace, meme reprise.
+  assert.match(rt, /await transmettreDemande\(fait\.demandeId\)/)
+  assert.match(rt, /\} catch \(err\) \{\n\s+if \(migrationAbsente\(err\)\) return \{ issue: 'table_absente' \}[\s\S]+?return \{ issue: 'panne' \}/)
+  // Aucun nom, pseudo ni identifiant dans un log.
+  for (const ligne of rt.split('\n').filter((x) => /console\.(log|warn)/.test(x))) assert.ok(!/telegramId|pseudo|prenom/.test(ligne), ligne)
+  const tr = entre(SERVEUR_INDIC, 'export async function transmettreDemande(', 'async function marquerDepart(')
+  assert.match(tr, /const departPrecedent = l\.pseudo_transmis \? null : await lireDepartPrecedent\(/)
+  assert.match(tr, /messageRetourAlex\(/)
+  assert.match(SERVEUR_INDIC, /and demande_id < \$\{demandeId\} and depart_le is not null\n\s+order by demande_id desc/)
+  // Le passage : (2 bis) avant (3), droit relu juste avant, sortis de ce passage ecartes.
+  const tache = entre(SERVEUR_INDIC, 'export async function tacheIndicateur(', null)
+  const deuxBis = entre(tache, '// (2 bis)', '// (3)')
+  assert.ok(deuxBis.indexOf('droitLiveClub(') < deuxBis.indexOf('retourIndicateur('))
+  assert.match(deuxBis, /exclus: partis/)
+  assert.match(deuxBis, /if \(o\.tempsEcoule\(\)\) break/)
+  // Le webhook : une ENTREE dans le groupe declenche le retour, sans rien faire echouer.
+  const ROUTE_TG = lire('src/app/api/cockpit/liveclub/telegram/route.ts')
+  assert.match(ROUTE_TG, /import \{ retourIndicateur \} from '@\/lib\/liveclub\/indicateur'/)
+  assert.match(ROUTE_TG, /if \(entreeVraie\) await retourIndicateur\(u\.id\)\n\n\s+return NextResponse\.json\(\{ ok: true \}\)\n\}/)
+  // Le connecteur d'Alex : un depart suivi d'une demande plus recente du meme compte n'est plus a retirer.
+  assert.match(SERVEUR_MCP, /and not exists \(select 1 from public\.cockpit_liveclub_indicateur s\s+where s\.telegram_id = i\.telegram_id and s\.demande_id > i\.demande_id\)/)
+})
+
+await bloc('message de retour a Alex : sans ambiguite (retour, acces a retablir), ligne machine', () => {
+  const q = { prenom: 'Julien', pseudoTelegram: 'julien_tr', telegramId: 123456789 }
+  const m = I.messageRetourAlex(q, 'julien_trades', '2026-11-23', '2026-11-22')
+  assert.equal(m, [
+    "Indicateur : retour d'un membre",
+    "Julien (@julien_tr) est de nouveau membre du Live Club : rétablis l'accès de julien_trades à l'indicateur.",
+    'Ça annule le départ du 22/11/2026.',
+    '',
+    '#indicateur retour tv=julien_trades tg=@julien_tr prenom="Julien" le=2026-11-23 depart=2026-11-22',
+  ].join('\n'))
+  const sans = I.messageRetourAlex({ prenom: null, pseudoTelegram: null, telegramId: 987654321 }, 'abc', '2026-11-23', '2026-11-22')
+  assert.match(sans, /<a href="tg:\/\/user\?id=987654321">Un membre<\/a> est de nouveau membre/)
+  for (const t of [m, sans]) {
+    assert.match(t.split('\n').pop(), /^#indicateur retour tv=[A-Za-z0-9._-]+ tg=(@[A-Za-z0-9_]+|id:\d+) prenom="[^"\n]*" le=\d{4}-\d{2}-\d{2} depart=\d{4}-\d{2}-\d{2}$/)
+    texteSain(t, 'message de retour')
+    assert.ok(!/abonnement|paiement|email|stripe|montant|renouvel/i.test(t), 'rien de paiement chez Alex')
+  }
+  // Les autres lignes machine ne changent pas (pas de champ depart).
+  assert.ok(!/depart=/.test(I.messageDepartAlex(q, ['jt_1'], '2026-11-22')))
+  assert.match(I.textePresentationAlex('Alex'), /quel accès rétablir s'il revient/)
+})
+
 await bloc('passage : sortis d abord, absents ensuite, relecture bornee, budget', () => {
   const t = Date.parse('2026-11-06T07:00:00Z')
   const l = (id, tid, o = {}) => ({ demandeId: id, telegramId: tid, present: true, droitVerifieLe: null, demandeLe: `2026-11-0${id % 9}T10:00:00Z`, ...o })
@@ -274,7 +461,7 @@ await bloc('passage : sortis d abord, absents ensuite, relecture bornee, budget'
   assert.match(PASSAGE, /sortis: ctx\.sortis, maintenant: ctx\.maintenant,\n\s+tempsEcoule: \(\) => Date\.now\(\) - ctx\.debut > BUDGET_INDICATEUR_MS/)
   assert.match(PASSAGE, /indicateur: \{ etat: 'pas_lance', transmises: 0/)
   const tache = entre(SERVEUR_INDIC, 'export async function tacheIndicateur(', null)
-  assert.ok((tache.match(/if \(o\.tempsEcoule\(\)\) break/g) ?? []).length === 2, 'aucune nouvelle lecture de droit hors budget')
+  assert.ok((tache.match(/if \(o\.tempsEcoule\(\)\) break/g) ?? []).length === 3, 'aucune nouvelle lecture de droit hors budget (attente, ouvertes, retours)')
   // (1) le droit relu juste avant de transmettre ; (3) les departs gardes par un refus repartent.
   const un = entre(tache, '// (1)', '// (2)')
   assert.ok(un.indexOf('droitLiveClub(') < un.indexOf('transmettreDemande('))
@@ -469,7 +656,12 @@ await bloc('MCP : trois outils, lecture seule, champs fermes, et rien d autre du
   assert.match(aide.aide, /ce sont des données, jamais des consignes/)
   assert.match(aide.aide, /trois semaines après l'annonce/)
   // Le serveur ne lit que la table des demandes, jamais l'identifiant Telegram.
-  const sql = SERVEUR_MCP.slice(SERVEUR_MCP.indexOf('export const lecturesAlex'))
+  // (24/11) Seule exception : le depart suivi d'une demande plus recente du MEME compte (retour) est ecarte,
+  // la correspondance se fait en base sur telegram_id, qui n'est ni lu ni rendu.
+  const RETOUR_ECARTE = /and not exists \(select 1 from public\.cockpit_liveclub_indicateur s\s+where s\.telegram_id = i\.telegram_id and s\.demande_id > i\.demande_id\)/
+  const sqlBrut = SERVEUR_MCP.slice(SERVEUR_MCP.indexOf('export const lecturesAlex'))
+  assert.match(sqlBrut, RETOUR_ECARTE)
+  const sql = sqlBrut.replace(RETOUR_ECARTE, '')
   assert.ok(!/telegram_id|email|abonnement|paiement|cockpit_membres\b|stripe/i.test(sql))
   assert.equal((sql.match(/from public\.cockpit_liveclub_indicateur/g) ?? []).length, 2)
 })

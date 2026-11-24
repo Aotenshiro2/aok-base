@@ -5,6 +5,7 @@ import {
   JOURS_ABSENCE_RETOUR, accueilAPublier, envoisAccueil, estLeveeDeBan, genreEntree, nomPourAccueil, texteAlerteAccueilNonPublie, type AvantEntree,
 } from '@/lib/liveclub/accueil-groupe'
 import { lireAvantEntree } from '@/lib/liveclub/avant-entree'
+import { retourIndicateur } from '@/lib/liveclub/indicateur'
 import { alerterEquipeTexte } from '@/lib/alerte-equipe-telegram'
 import { reconnaitrePersonne } from '@/lib/liveclub/reconnaissance'
 import type { Reconnaissance } from '@/lib/liveclub/reconnaissance-pur'
@@ -268,6 +269,14 @@ export async function POST(req: NextRequest) {
     // ligne, sans identifiant, pour que les logs disent pourquoi.
     console.log(`[liveclub/telegram] entree sans accueil : compte deja connu (${avant.sortiLe ? `sorti il y a moins de ${JOURS_ABSENCE_RETOUR} jours` : 'sans date de sortie'})`)
   }
+
+  // (24/11) L'indicateur d'Alex : un compte qui ENTRE et dont la derniere
+  // demande est fermee (Alex a recu « retire l'acces ») redevient membre ? Le
+  // droit est relu dans retourIndicateur, juste avant d'agir : 'oui' = Alex
+  // recoit « retablis l'acces » (ou le depart s'annule s'il ne l'a pas encore
+  // recu). Un tout premier arrivant n'a aucune demande : rien. Ne jette pas :
+  // un relais injoignable ne fait pas rejouer l'update, le passage reessaie.
+  if (entreeVraie) await retourIndicateur(u.id)
 
   return NextResponse.json({ ok: true })
 }
