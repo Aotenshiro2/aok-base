@@ -1233,6 +1233,13 @@ await bloc('signaux, liste fermee : les cles du contrat et elles seules, forme d
   // Les apps du contrat.
   assert.deepEqual(SP.SIGNAUX['academie.recherche_vide'].apps, ['site', 'academie', 'masterclass'])
   assert.deepEqual(SP.SIGNAUX['academie.video_illisible'].apps, ['academie', 'masterclass'])
+  // 26/11 : le type d'erreur du lecteur accompagne la lecon (jeton court, jamais de texte libre).
+  assert.deepEqual(Object.keys(SP.SIGNAUX['academie.video_illisible'].contexte), ['lecon', 'erreur'])
+  assert.deepEqual(SP.normaliserContexte('academie.video_illisible', { lecon: '5f06b712-6a46-4b2a-bfec-3e23c193ca71', erreur: 'relance_echouee' }),
+    { lecon: '5f06b712-6a46-4b2a-bfec-3e23c193ca71', erreur: 'relance_echouee' })
+  assert.deepEqual(SP.normaliserContexte('academie.video_illisible', { lecon: 'live-ouvert-2026-11-26', erreur: 'Video Refusée!' }),
+    { lecon: 'live-ouvert-2026-11-26', erreur: 'video_refusee' })
+  assert.equal(SP.normaliserContexte('academie.video_illisible', { lecon: 'x', detail: 'texte' }), null, 'champ hors liste : refuse')
   assert.deepEqual(SP.SIGNAUX['carnet.sync_echec'].apps, ['extension'])
   assert.deepEqual(Object.keys(SP.SIGNAUX['pilotage.import_releve_non_reconnu'].contexte), ['extension', 'broker_detecte'])
   for (const cle of ['bot.bouton_perime', 'bot.message_non_compris', 'bot.agent_echec']) assert.deepEqual(SP.SIGNAUX[cle].contexte, {})

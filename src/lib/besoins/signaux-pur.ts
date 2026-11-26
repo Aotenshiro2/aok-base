@@ -73,7 +73,7 @@ const DEFINITIONS = {
   'carnet.sync_echec': { apps: ['extension'], genre: 'refus', titre: 'Carnet : synchronisation en échec', contexte: { code: 'jeton' } },
   'carnet.export_echec': { apps: ['extension'], genre: 'refus', titre: 'Carnet : export en échec', contexte: { format: 'jeton' } },
   'academie.recherche_vide': { apps: ['site', 'academie', 'masterclass'], genre: 'impasse', titre: 'Académie : recherche sans résultat', contexte: { termes: 'texte' } },
-  'academie.video_illisible': { apps: ['academie', 'masterclass'], genre: 'refus', titre: 'Académie : vidéo illisible', contexte: { lecon: 'jeton' } },
+  'academie.video_illisible': { apps: ['academie', 'masterclass'], genre: 'refus', titre: 'Académie : vidéo illisible', contexte: { lecon: 'jeton', erreur: 'jeton' } },
   'journal.import_echec': { apps: ['journal'], genre: 'refus', titre: "Journal : import de trades en échec", contexte: { code: 'jeton' } },
   'site.page_introuvable': { apps: ['site'], genre: 'impasse', titre: 'Site : page introuvable', contexte: { chemin: 'chemin' } },
   'site.paiement_refuse': { apps: ['site'], genre: 'refus', titre: 'Site : paiement refusé', contexte: { offre: 'jeton' } },
