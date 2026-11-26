@@ -3,7 +3,7 @@ sujet: live-club
 titre: Le Live Club
 resume: L'abonnement de lives éducatifs animés par Mélanie et Brice, avec le groupe Telegram, les replays, les modules de formation et le Carnet Premium tant que l'abonnement est actif. 139 € par mois, sans engagement. Pas encore membre : le même accès peut être offert pour une durée par un dépôt chez notre broker partenaire.
 mots: live club, lives, abonnement, telegram, groupe, replays, académie, pause, arrêt, bot, prix, meltrade, melaniechart, horaires, heures, annonce, broker, dépôt, raisefx, lots, accès offert
-verifie: 2026-11-20
+verifie: 2026-11-26
 sources: sites/Aoknowledgecom/v3/src/pages/LiveClubPage.tsx ; sites/Aoknowledgecom/v3/src/pages/LiveClubCGVPage.tsx ; apps/journal-d-etude/src/lib/liveclub/config.ts (URLS_ABONNEMENT, URL_PORTAIL_CARTE, URL_FORMATION_LIVECLUB) ; src/lib/politique-information.ts (LIENS_UTILES, RaiseFx) ; src/lib/liveclub/accueil-groupe.ts ; src/lib/liveclub/emails.ts (modeleAccesBroker, modeleRappelFinBroker, modeleFinBroker, modeleRelanceLots, modeleSuspensionLots) ; src/lib/liveclub/lots-pur.ts (DELAI_LOTS_JOURS, EXEMPLE_LOTS, TENUE_LOTS, departLots) ; src/lib/liveclub/prompt-membre.ts (consigneLots, outil pause_par_depot) ; src/lib/liveclub/pause-depot-pur.ts (texteOffrePauseDepot : la pause par dépôt des abonnés, une autre offre) ; réponse de l'équipe au fil support bdb0cde7 du 10/11/2026 (accès par dépôt RaiseFx) ; forfaits 3 et 6 mois : D:/6_Societe/Pilotage/Data-Performance/marketing/black-friday-2026/00-FAITS-20-11.md (faits validés du 20/11)
 ---
 
@@ -29,10 +29,11 @@ Pour les traders qui ont déjà les bases et veulent les mettre à l'épreuve du
 - Pas encore membre : un dépôt chez notre broker partenaire (RaiseFx aujourd'hui), fait par notre lien, ouvre le même Live Club que l'abonnement : groupe Telegram, lives, replays. C'est un accès offert pour une durée, jusqu'à une date, non renouvelable : pour rester ensuite, on s'abonne avec la même adresse email. Une condition : trader ses premiers lots chez le broker dans les 3 semaines qui suivent l'entrée au Live Club. Le montant du dépôt et la durée de l'accès, c'est l'équipe qui les confirme. Déjà abonné : la pause de l'abonnement par un dépôt est une autre offre, avec ses propres conditions, que donne le bot du Live Club.
 - Edgyx, le journal de trading recommandé, est un abonnement à part, pas compris dans le Live Club.
 - Les conditions : https://aoknowledge.com/live-club/conditions
-- Les forfaits 3 mois et 6 mois, à partir du vendredi 27 novembre à 0 h (heure de Paris) : le Live Club se prend aussi en forfait payé d'un coup, 3 mois à 249 € (soit 83 € par mois) ou 6 mois à 444 € (soit 74 € par mois). C'est une formule, pas une réduction ni un code promo. Tu n'en parles pas de toi-même : quand on te demande les forfaits, tu confirmes qu'ils existent à partir du 27 novembre.
-- Ces deux montants sont le prix de lancement, du vendredi 27/11 à 0 h au lundi 30/11 à 23 h 59 (heure de Paris).
-- À partir du mardi 1/12, les forfaits restent, au prix classique. Tu ne donnes pas de montant pour le prix classique, ni de comparaison avec le prix du mois.
-- Les liens de paiement, à donner à partir du vendredi 27/11 à 0 h : 3 mois https://buy.stripe.com/aFadR80Si4Vc1jf4SKbsc08 ; 6 mois https://buy.stripe.com/5kQcN444ubjAaTP2KCbsc09 ; la page https://aoknowledge.com/black-friday.
+- Le forfait de 3 mois, à partir du vendredi 27 novembre à 0 h (heure de Paris) : le Live Club se prend aussi en forfait de 3 mois payé d'un coup. C'est le seul forfait mis en avant. C'est une formule, pas une réduction ni un code promo, et il n'y a ni réduction en plus ni code promo. Tu n'en parles pas de toi-même : quand on te demande les forfaits, tu confirmes qu'il existe à partir du vendredi 27 novembre.
+- Son prix : 239 € du vendredi 27/11 à 0 h au lundi 30/11 à 23 h 59 (heure de Paris), puis 267 € à partir du mardi 1er décembre, à l'achat comme au renouvellement. Tu donnes toujours le prix avec ses dates.
+- Un forfait de 3 mois pris à 239 € par nos liens se renouvelle à 267 €. Le membre reçoit un rappel 5 semaines avant l'échéance, avec le prix et le lien pour ne pas renouveler, puis un autre rappel 1 semaine avant.
+- Le forfait de 6 mois n'est pas mis en avant : tu n'en parles pas de toi-même. Si on te le demande, tu ne donnes aucun prix ni aucun lien pour lui : tu proposes de transmettre la question à l'équipe (demander_un_humain).
+- Les liens, à donner à partir du vendredi 27/11 à 0 h : la page https://aoknowledge.com/black-friday ; le paiement direct du 3 mois à 239 € https://buy.stripe.com/7sYcN4eJ8cnEfa5ad4bsc0e, jusqu'au lundi 30/11 à 23 h 59 seulement ; à partir du mardi 1er décembre, le paiement du 3 mois à 267 € https://buy.stripe.com/9B68wO9oOgDU2njgBsbsc0g.
 
 ## Comment y aller
 
