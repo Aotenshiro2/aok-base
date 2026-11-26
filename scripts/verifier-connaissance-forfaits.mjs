@@ -15,13 +15,14 @@ await bloc('connaissance des forfaits de l agent : 3 mois a 239 € (renouvele a
   const gen = lire('../src/lib/connaissances.generated.ts')
   const prompt = lire('../src/lib/liveclub/prompt-membre.ts')
   for (const [nom, x] of [['md', md], ['generated', gen], ['prompt', prompt]]) {
-    assert.doesNotMatch(x, /249 ?€|444 ?€|498 ?€|534 ?€|297 ?€|aFadR80Si4Vc1jf4SKbsc08|5kQcN444ubjAaTP2KCbsc09|83 € par mois|74 € par mois/, nom)
+    assert.doesNotMatch(x, /249 ?€|444 ?€|498 ?€|534 ?€|297 ?€|aFadR80Si4Vc1jf4SKbsc08|5kQcN444ubjAaTP2KCbsc09|7sYcN4eJ8cnEfa5ad4bsc0e|9B68wO9oOgDU2njgBsbsc0g|7sYcN4e|9B68wO9|83 € par mois|74 € par mois/, nom)
     assert.doesNotMatch(x, /6 mois (à|a) \d|6 mois : \d|six mois (à|a) \d/i, nom)
   }
   for (const x of [md, gen]) {
     assert.ok(x.includes('239 €') && x.includes('267 €'))
-    assert.ok(x.includes('https://buy.stripe.com/7sYcN4eJ8cnEfa5ad4bsc0e'))
-    assert.ok(x.includes('https://buy.stripe.com/9B68wO9oOgDU2njgBsbsc0g'))
+    assert.ok(x.includes('https://buy.stripe.com/00w00i6cC4Vc3rnetkbsc0d'), 'lien d Adil')
+    assert.ok(x.includes('https://aoknowledge.com/live-club,'), 'apres le 30/11 : la page live-club')
+    assert.ok(x.includes('tu ne donnes plus de lien de paiement direct pour le forfait'))
     assert.ok(x.includes('https://aoknowledge.com/black-friday'))
     assert.ok(x.includes('5 semaines avant') && x.includes('1 semaine avant'))
     assert.ok(x.includes('se renouvelle à 239 €'), 'achat a 239 : renouvellement a 239')
