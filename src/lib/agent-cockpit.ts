@@ -1746,7 +1746,9 @@ export async function boucleAgent(
   canal: CanalAgent = { source: 'agent_cockpit', auteur: `cockpit:${userId}` },
 ): Promise<ReponseAgent> {
   const client = aiClient('cockpit')
-  const model = AI_MODEL.cockpit
+  // (27/11) L agent seul passe a Opus 5.5 : moins cher (4/20 $, lecture de cache 0,20 $) a qualite egale.
+  // La creation et l enquete gardent AI_MODEL.cockpit : elles imposent un outil, ce qu Opus 5.5 refuse.
+  const model = process.env.AI_MODEL_AGENT_COCKPIT?.trim() || 'claude-opus-5-5'
   const messages: Anthropic.MessageParam[] = [...historique]
   const etapes: { sql: string; resultat_tronque: boolean }[] = []
   const traces: TraceOutil[] = []
