@@ -3,7 +3,7 @@ sujet: dix-pour-cent-club
 titre: Le 10% Club
 resume: Le pack d'apprentissage avancé d'AOKnowledge, en vidéo sur l'Académie du site : 1 999 € en une fois, accès à vie aux vidéos du pack, avec le Carnet du Trader et Pilotage en Premium pendant 1 an, et le Journal d'Études.
 mots: 10% club, dix pour cent, pack d'apprentissage avancé, pack, formation complète, académie, smart money, paypal, accès à vie, club
-verifie: 2026-11-20
+verifie: 2026-11-26
 sources: sites/Aoknowledgecom/v3/src/pages/AccelerateurPage.tsx (/formation, nom de l'offre changé au commit 9088ab7 du 20/11) ; tables academie_offres (offre formation-complete) et academie_offre_contenus (relues le 2026-11-20) ; apps/journal-d-etude/src/lib/entitlements.ts (raison formation)
 ---
 
@@ -25,7 +25,7 @@ Pour ceux qui veulent comprendre pourquoi le prix bouge plutôt que suivre la le
 - Ou en 4 fois sans frais avec PayPal, sous réserve d'éligibilité selon les critères de PayPal.
 - L'accès s'ouvre dès que PayPal confirme le paiement, et un email te le confirme.
 - Inclus en plus du programme : le Carnet du Trader et Pilotage en Premium pendant 1 an, et le Journal d'Études.
-- Le Live Club est un abonnement séparé, sans engagement, à 139 € par mois.
+- Le Live Club est un abonnement séparé, sans engagement, à 99 € par mois.
 - Droit de rétractation de 14 jours, qui cesse dès que la fourniture des contenus numériques a commencé avec ton accord.
 
 ## Comment y aller

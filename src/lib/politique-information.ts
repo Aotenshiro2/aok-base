@@ -104,8 +104,8 @@ export const INFOS_PUBLIQUES: readonly InfoPublique[] = [
   },
   {
     sujet: 'Prix du Live Club',
-    texte: "Le prix affiché est de 139 euros par mois, sans engagement. Si la personne a un doute sur SON tarif à elle, c'est l'équipe qui regarde.",
-    texteLiveClub: "Le prix affiché est de 139 euros par mois, sans engagement. Ce que paie le membre qui t'écrit, après son éventuelle remise, c'est mes_montants qui le dit, quand il le demande.",
+    texte: "Le prix du mensuel est de 99 euros par mois, sans engagement. Si la personne a un doute sur SON tarif à elle, c'est l'équipe qui regarde.",
+    texteLiveClub: "Le prix du mensuel est de 99 euros par mois, sans engagement. Ce que paie le membre qui t'écrit, après son éventuelle remise, c'est mes_montants qui le dit, quand il le demande.",
     source: 'sites/Aoknowledgecom/v3/src/pages/LiveClubPage.tsx (meta description et bloc prix de /live-club)',
   },
   {
