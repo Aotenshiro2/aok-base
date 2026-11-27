@@ -13,6 +13,8 @@
 // - retourSur : le chemin de la page ou revenir apres un paiement redirige.
 
 import { createHmac, timingSafeEqual } from 'node:crypto'
+// Import de type seulement : efface a l'execution, le fichier reste testable seul par node.
+import type { RemiseCheckout } from '../code-promo-pur'
 
 /** Le chemin de retour : une page de l'academie, sans redirection ouverte (memes regles que src/lib/retour.ts du site). */
 export function retourSur(valeur: unknown): string | null {
@@ -87,6 +89,12 @@ export function corpsSession(o: OffreEnVente, p: {
   essai: boolean
   /** (20/11/2026) expires_at (secondes) d'un tarif date : expirationSession, prix-membre-pur.ts. */
   expiresAt?: number | null
+  /**
+   * (27/11/2026, Black Friday) BF26 applique (discounts) ou son champ seul
+   * (allow_promotion_codes) : remiseCheckout (code-promo-pur.ts) le decide.
+   * Jamais avec un tarif membre, meme demande : on ne cumule pas.
+   */
+  remise?: RemiseCheckout
 }): URLSearchParams {
   const c = new URLSearchParams()
   c.set('mode', 'payment')
@@ -120,6 +128,10 @@ export function corpsSession(o: OffreEnVente, p: {
     c.set('payment_intent_data[metadata][academie_tarif]', o.tarif)
   }
   if (typeof p.expiresAt === 'number' && Number.isInteger(p.expiresAt) && p.expiresAt > 0) c.set('expires_at', String(p.expiresAt))
+  // BF26 : la remise appliquee OU le champ, jamais les deux (Stripe refuse), jamais avec un tarif membre.
+  const r = o.tarif ? null : p.remise ?? null
+  if (r && 'promotionCode' in r) c.set('discounts[0][promotion_code]', r.promotionCode)
+  else if (r) c.set('allow_promotion_codes', 'true')
   return c
 }
 

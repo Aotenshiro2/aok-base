@@ -7,6 +7,7 @@ import { creerSessionAbonnement, prixDesOffres, ventePubliquePilotage, clePilota
 import { estAdminPilotage, palierDuMembre } from '@/lib/pilotage-niveau'
 import { offreDemandee, retourPilotage } from '@/lib/pilotage-paliers'
 import { decisionSoutien, estRaisonComprise, soutienOuvert } from '@/lib/soutien-pur'
+import { champCodePromo, libelleRemise, promoBf26, remiseCheckout } from '@/lib/code-promo-pur'
 
 /**
  * POST /api/pilotage/achat : la session Stripe Embedded Checkout d'un
@@ -31,6 +32,14 @@ import { decisionSoutien, estRaisonComprise, soutienOuvert } from '@/lib/soutien
  * abonnement Pilotage est deja actif (409 'deja') ou si rien n'est compris
  * (409 'pas_compris' : c'est un achat normal).
  *
+ * Code promo (27/11/2026, Black Friday) : hors soutien, et pour un compte dont
+ * le Premium n'est pas deja compris, la session porte BF26 deja applique
+ * (discounts ; coupon -25 % duration once : le 1er paiement seulement), ou a
+ * defaut le champ code promo (allow_promotion_codes), jusqu'a
+ * CODE_PROMO_JUSQUA (code-promo-pur.ts). Le code et ses produits sont dans Stripe.
+ * Le montant_eur pose par le webhook reste le prix du catalogue (CATALOGUE),
+ * pas le montant paye apres remise : le paiement reel est chez Stripe (paiement_id).
+ *
  * 200 { ok, client_secret, session_id, cle_publique }
  * 400 'corps' | 401 'compte' | 403 'ferme' | 409 'deja' | 'pas_compris'
  * 503 'config' (cle absente, sans permission, prix pas crees) | 'indisponible' | 502 'stripe'
@@ -40,6 +49,8 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 20
 
 const METHODES = 'POST, OPTIONS'
+/** Le palier lu pour BF26 (Stripe en direct possible) : au-dela, BF26 reste applique. */
+const DELAI_PALIER_CODE_PROMO_MS = 5000
 
 export async function OPTIONS(req: NextRequest) {
   return corsPreflight(req, METHODES)
@@ -99,6 +110,25 @@ export async function POST(req: NextRequest) {
     if (!d.ok) return refus(d.erreur, d.status)
   }
 
+  // (27/11/2026, Black Friday) BF26 (cree et limite dans Stripe) : jamais en soutien, ni pour un compte dont le Premium
+  // est deja compris (Live Club, Formation, ETM...), jusqu'a CODE_PROMO_JUSQUA (code-promo-pur.ts). Le palier illisible
+  // ou trop lent ne bloque pas la vente : BF26 reste applique (un compte compris achete rarement hors soutien, et un
+  // acheteur ne doit pas perdre sa remise sur une lecture lente).
+  let compris = false
+  if (!soutien && userId && champCodePromo({ quand: new Date(), prixMembre: false })) {
+    try {
+      const p = await Promise.race([
+        palierDuMembre(userId),
+        new Promise<null>(r => setTimeout(() => r(null), DELAI_PALIER_CODE_PROMO_MS)),
+      ])
+      if (p === null) console.warn(`[pilotage/achat] palier trop lent (code promo), BF26 garde compte=${tronquer(userId)}`)
+      compris = Boolean(p && estRaisonComprise(p.raison))
+    } catch (err) {
+      console.warn(`[pilotage/achat] palier illisible (code promo), BF26 garde : ${messageErreur(err)}`)
+    }
+  }
+  const remise = remiseCheckout({ quand: new Date(), prixMembre: false, soutien, compris, promo: promoBf26(process.env) })
+
   const cle = clePilotage()
   const publique = clePublique()
   if (!cle || !publique) {
@@ -119,8 +149,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const s = await creerSessionAbonnement(cle, { slug, prix, retourUrl, userId, email, essai, soutien })
-    console.info(`[pilotage/achat] session creee offre=${slug} compte=${userId ? tronquer(userId) : 'aucun'}${essai ? ' essai' : ''}${soutien ? ' soutien' : ''}`)
+    const s = await creerSessionAbonnement(cle, { slug, prix, retourUrl, userId, email, essai, soutien, remise })
+    console.info(`[pilotage/achat] session creee offre=${slug} compte=${userId ? tronquer(userId) : 'aucun'}${essai ? ' essai' : ''}${soutien ? ' soutien' : ''}${libelleRemise(s.remise)}`)
     return NextResponse.json({ ok: true, client_secret: s.clientSecret, session_id: s.id, cle_publique: publique }, { headers })
   } catch (err) {
     if (err instanceof ErreurStripe && (err.permission || err.statut === 401)) {

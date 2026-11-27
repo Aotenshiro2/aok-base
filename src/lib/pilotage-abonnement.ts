@@ -21,7 +21,8 @@
 // evenement en relisant l'abonnement chez Stripe (jamais l'evenement seul).
 
 import { prisma } from '@/lib/db'
-import { appeler, cleAchat, ErreurStripe } from '@/lib/academie/achat'
+import { appeler, appelerAvecRemise, cleAchat, ErreurStripe } from '@/lib/academie/achat'
+import type { RemiseCheckout } from '@/lib/code-promo-pur'
 import { messageErreur } from '@/lib/liveclub/pur'
 import {
   CATALOGUE, SITE_PILOTAGE, SLUGS_OFFRES_PILOTAGE, chargeDesPaiements, corpsSessionAbonnement, estSlugPilotage, lireAbonnement, produitDe,
@@ -55,10 +56,12 @@ export async function prixDesOffres(): Promise<Map<SlugOffrePilotage, string>> {
 
 export async function creerSessionAbonnement(cle: string, p: {
   slug: SlugOffrePilotage; prix: string; retourUrl: string; userId: string | null; email: string | null; essai: boolean; soutien?: boolean
-}): Promise<{ id: string; clientSecret: string }> {
-  const s = await appeler(cle, '/v1/checkout/sessions', corpsSessionAbonnement(p))
-  if (typeof s.id !== 'string' || typeof s.client_secret !== 'string') throw new ErreurStripe(502, 'reponse', false)
-  return { id: s.id, clientSecret: s.client_secret }
+  remise?: RemiseCheckout
+}): Promise<{ id: string; clientSecret: string; remise: RemiseCheckout }> {
+  // (27/11/2026, BF26) Stripe refuse le code applique : une seconde session avec le champ seul (appelerAvecRemise).
+  const s = await appelerAvecRemise(cle, p.remise ?? null, r => corpsSessionAbonnement({ ...p, remise: r }), 'pilotage/achat')
+  if (typeof s.corps.id !== 'string' || typeof s.corps.client_secret !== 'string') throw new ErreurStripe(502, 'reponse', false)
+  return { id: s.corps.id, clientSecret: s.corps.client_secret, remise: s.remise }
 }
 
 export async function lireSessionCheckout(cle: string, id: string): Promise<Record<string, unknown>> {

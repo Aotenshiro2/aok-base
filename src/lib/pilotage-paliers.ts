@@ -234,6 +234,12 @@ export function corpsSessionAbonnement(o: {
   slug: SlugOffrePilotage; prix: string; retourUrl: string; userId: string | null; email: string | null; essai: boolean
   /** Le soutien (11/11/2026, soutien-pur.ts) : Premium deja compris, l'abonnement existant marque soutien=1. */
   soutien?: boolean
+  /**
+   * (27/11/2026, Black Friday) BF26 applique (discounts, coupon duration once :
+   * le 1er paiement seulement) ou son champ seul (allow_promotion_codes) :
+   * remiseCheckout (code-promo-pur.ts) le decide. Jamais en soutien, meme demande.
+   */
+  remise?: { promotionCode: string } | { champ: true } | null
 }): URLSearchParams {
   const produit = produitDe(o.slug)
   const c = new URLSearchParams()
@@ -263,6 +269,10 @@ export function corpsSessionAbonnement(o: {
     c.set('metadata[soutien]', '1')
     c.set('subscription_data[metadata][soutien]', '1')
   }
+  // BF26 : la remise appliquee OU le champ, jamais les deux (Stripe refuse), jamais en soutien.
+  const r = o.soutien ? null : o.remise ?? null
+  if (r && 'promotionCode' in r) c.set('discounts[0][promotion_code]', r.promotionCode)
+  else if (r) c.set('allow_promotion_codes', 'true')
   return c
 }
 

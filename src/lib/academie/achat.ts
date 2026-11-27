@@ -28,6 +28,7 @@
 
 import { prisma } from '@/lib/db'
 import { oublierDroitsDuCompte } from '@/lib/trouver-cours'
+import { sansRemiseAppliquee, type RemiseCheckout } from '@/lib/code-promo-pur'
 import { corpsSession, lireAchat, type AchatLu, type LectureAchat, type OffreEnVente } from './achat-pur'
 import {
   SQL_COMPLETER_PAIEMENT, SQL_COMPTES_DE_EMAIL, SQL_EMAIL_CONFIRME, SQL_OFFRE_EN_VENTE, SQL_OFFRE_PARTIE_EN_VENTE, SQL_POSER_ACHAT,
@@ -129,11 +130,32 @@ export async function emailConfirme(userId: string): Promise<string | null> {
 }
 
 export async function creerSession(cle: string, o: OffreEnVente, p: {
-  retourUrl: string; userId: string | null; email: string | null; essai: boolean; expiresAt?: number | null
-}): Promise<{ id: string; clientSecret: string }> {
-  const s = await appeler(cle, '/v1/checkout/sessions', corpsSession(o, p))
-  if (typeof s.id !== 'string' || typeof s.client_secret !== 'string') throw new ErreurStripe(502, 'reponse', false)
-  return { id: s.id, clientSecret: s.client_secret }
+  retourUrl: string; userId: string | null; email: string | null; essai: boolean; expiresAt?: number | null; remise?: RemiseCheckout
+}): Promise<{ id: string; clientSecret: string; remise: RemiseCheckout }> {
+  const remise = p.remise ?? null
+  const s = await appelerAvecRemise(cle, remise, r => corpsSession(o, { ...p, remise: r }), 'academie/achat')
+  if (typeof s.corps.id !== 'string' || typeof s.corps.client_secret !== 'string') throw new ErreurStripe(502, 'reponse', false)
+  return { id: s.corps.id, clientSecret: s.corps.client_secret, remise: s.remise }
+}
+
+/**
+ * (27/11/2026, BF26) Cree la session Checkout avec la remise ; si Stripe refuse
+ * une session qui portait le code applique (400 : code inactif ou expire,
+ * produit hors du code...), la recree UNE fois avec le champ seul. La vente
+ * ne tombe jamais a cause du code. Les autres refus remontent tels quels.
+ */
+export async function appelerAvecRemise(
+  cle: string, remise: RemiseCheckout, corps: (r: RemiseCheckout) => URLSearchParams, journal: string,
+): Promise<{ corps: Record<string, unknown>; remise: RemiseCheckout }> {
+  try {
+    return { corps: await appeler(cle, '/v1/checkout/sessions', corps(remise)), remise }
+  } catch (err) {
+    const applique = remise !== null && 'promotionCode' in remise
+    if (!applique || !(err instanceof ErreurStripe) || err.statut !== 400 || err.permission || err.conditions) throw err
+    console.warn(`[${journal}] Stripe refuse la remise BF26 (${err.type}), session recreee avec le champ code promo seul`)
+    const repli = sansRemiseAppliquee(remise)
+    return { corps: await appeler(cle, '/v1/checkout/sessions', corps(repli)), remise: repli }
+  }
 }
 
 // ---------------------------------------------------------------------------
