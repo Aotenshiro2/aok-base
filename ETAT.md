@@ -1,5 +1,34 @@
 # ETAT du journal d etudes
 
+## BOT LIVE CLUB : LE CHANGEMENT DE FORMULE (27/11/2026, GO de Brice « Go maintenant », chat de l'Orchestre Prix ; branche changement-formule depuis origin/master f07371a, poussee sur master ; migration 20261127120000 appliquee)
+
+- Outils de l'agent proposer_changement_formule { vers: mensuel | forfait_3_mois } et proposer_annuler_changement, comme
+  les proposer_ : le serveur ecrit la confirmation ou le refus, le clic execute (actions-membre.ts, ActionMembre
+  changement_formule / annuler_changement). Regle pure : src/lib/liveclub/changement-formule-pur.ts ; lecture brute
+  (lireEtatFormule, posee par resumerAbonnement dans AbonnementResume.formule) dans pur.ts.
+- Forfait de 3 mois vers mensuel : calendrier Stripe (from_subscription), phase en cours recopiee jusqu'a la date
+  d'effet (fin de periode, trial_end compris, l'essai n'est jamais leve), puis price_1TdA3RCbHiN0O0XixdHcppnE (99 EUR)
+  iterations 1, proration none, end_behavior release. Meme abonnement. Metadonnees sur l'abonnement et le calendrier :
+  changement_formule_par = bot-live-club, _sens, _demande_le, _effet, _schedule (notre calendrier = ces metadonnees ET
+  le meme subscription.schedule). Annulation = release du calendrier + metadonnees effacees.
+- Sens montant COUPE : PRIX_FORFAIT_3_MOIS_CIBLE = null (jamais le prix d'Adil, jamais le 267 archive) ; le membre
+  recoit le lien direct jusqu'au 30/11 23 h 59, puis la page live-club ou l'equipe.
+- Refus : ETM, impaye, plusieurs lignes, calendrier pas le notre, pause, arret programme (annuler l'arret d'abord),
+  deja dans la formule, deja prevu. Pause ou arret pendant un changement prevu : refuses (annuler le changement
+  d'abord) ; apres la date d'effet, stripe.ts relache notre calendrier avant la pause ou l'arret.
+- mon_abonnement dit le changement prevu (phrase et faits). Geste 'changement_formule' au journal (details.etape,
+  sens, effet_le) et sa ligne au fil Support.
+- Rappels de renouvellement du forfait (5 semaines, 1 semaine) : PAS ENCORE CODES au 27/11 (introuvables dans ce depot,
+  le cockpit et prix/scripts). Le rappel J-3 existant lit l'apercu Stripe de la prochaine facture, donc dit 99 EUR.
+  Pour le futur rappel : rappelForfait() rend 'passage_au_mois' et texteRappelPassageAuMois() le texte juste.
+- Le passage de 8 h (prix/scripts/mel_forfait_arrete_mensuel.py, hors depot) pose trial_end sur un forfait : a
+  surveiller s'il tombe un jour sur un forfait qui porte notre calendrier (cas pas teste chez Stripe).
+- Migration du workspace commitee sur la branche migration-changement-formule (worktree
+  ~/Projects/_worktrees/workspace-migration-changement-formule), NON poussee.
+- Verifs : verifier-changement-formule (13 blocs), -liveclub (66), -connaissance-forfaits, -pause-depot (19),
+  -besoins (48), -relais-accueil (13), generer-connaissances --verifier, tsc, eslint des fichiers touches, next build : ok.
+  Aucun appel Stripe en ecriture pendant les essais.
+
 ## INDICATEUR D'ALEX : LE RETOUR D'UN MEMBRE (24/11/2026, commite NON pousse, branche bot-notification-reintegration depuis origin/master b54c374 ; aucune migration)
 
 - Carte du cockpit bot.notification_reintegration. Cas du 22/11 : une membre sortie pour un renouvellement rate, Alex

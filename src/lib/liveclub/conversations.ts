@@ -124,11 +124,13 @@ export async function ajouterEchange(telegramId: number, question: string, repon
 
 /** L'action qu'un bouton de confirmation peut declencher. Posee par le serveur, jamais par le modele. */
 export type ActionMembre = {
-  type: 'pause' | 'arret' | 'annuler_arret'
+  type: 'pause' | 'arret' | 'annuler_arret' | 'changement_formule' | 'annuler_changement'
   abonnementId: string
   /** Client Stripe de l'abonnement au moment de la proposition (re-verifie a la confirmation). */
   clientStripe: string | null
   nbMois?: number
+  /** (27/11) Changement de formule : la formule visee (changement-formule-pur.ts). */
+  vers?: 'mensuel' | 'forfait_3_mois'
   /** ISO : au-dela, la confirmation est refusee (le membre redemande). */
   expire: string
 }
@@ -165,7 +167,7 @@ export async function poserActionEnAttente(
 
 function estAction(a: unknown): a is ActionMembre {
   const x = a as ActionMembre
-  return Boolean(x && ['pause', 'arret', 'annuler_arret'].includes(x.type)
+  return Boolean(x && ['pause', 'arret', 'annuler_arret', 'changement_formule', 'annuler_changement'].includes(x.type)
     && typeof x.abonnementId === 'string' && typeof x.expire === 'string')
 }
 

@@ -484,6 +484,9 @@ const FAUX_RESUME = {
   proposer_pause: n => `Tu confirmes une pause de ${n} mois ?\n\nTa période payée va jusqu'au 15 octobre 2099 : tu gardes le groupe jusque-là. [SIMULE]`,
   proposer_arret: () => `Tu confirmes l'arrêt de ton abonnement ? [SIMULE]`,
   proposer_annuler_arret: () => null, // pas d'arret prevu sur le faux abonnement
+  // (27/11) Le changement de formule : une confirmation simulee (la regle est testee dans verifier-changement-formule.mjs).
+  proposer_changement_formule: () => `Tu confirmes le changement de formule ? [SIMULE]`,
+  proposer_annuler_changement: () => `Tu confirmes l'annulation du changement de formule ? [SIMULE]`,
 }
 const TEXTE_SANS_REPONSE = "[repli : l'agent n'a pas abouti, menu a boutons]"
 

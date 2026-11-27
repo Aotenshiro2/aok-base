@@ -16,8 +16,12 @@ import { lireProduitsLiveClub, produitsLiveClub } from './produits'
 import {
   type AbonnementResume, resumerAbonnement, preparerPoseDePause, metadonneesAdoption,
   effacementMetadonneesPause, nbMoisPauseValide, statutDonneDroit, normaliserEmail, requeteRechercheEmail,
-  enRetardDePaiement, etatImpaye, lireImpaye, premierEchecFacture,
+  enRetardDePaiement, etatImpaye, lireImpaye, premierEchecFacture, lireEtatFormule, type VersFormule,
 } from './pur'
+import {
+  corpsCalendrierChangement, decisionAnnulationChangement, decisionChangement, effacementMetadonneesChangement,
+  metadonneesChangement, phaseCouranteConforme, refusPendantChangement,
+} from './changement-formule-pur'
 
 export type { AbonnementResume }
 
@@ -365,9 +369,102 @@ async function resumeOuErreur(sub: Record<string, unknown>): Promise<AbonnementR
   return r
 }
 
+// ---------------------------------------------------------------------------
+// (27/11, Brice) Le CHANGEMENT DE FORMULE (changement-formule-pur.ts) : un
+// calendrier Stripe (subscription schedule) cree depuis l'abonnement, la
+// phase en cours jusqu'a la date d'effet, puis le prix cible. Cle d'ecriture :
+// permission « Subscription schedules : ecriture » (groupe Billing) en plus.
+// ---------------------------------------------------------------------------
+
+/**
+ * Notre calendrier dont la date d'effet est passee (l'abonnement est deja
+ * dans sa nouvelle formule) : on le relache, rien ne change pour le membre, et
+ * l'abonnement redevient modifiable directement (arret, pause). Notre
+ * changement encore A VENIR : on jette (regle 6, annuler d'abord le
+ * changement). Rend l'abonnement relu. Un calendrier qui n'est pas le notre
+ * n'est pas touche.
+ */
+async function libererChangementPasse(abonnementId: string, sub: Record<string, unknown>, geste: 'pause' | 'arret'): Promise<Record<string, unknown>> {
+  const e = lireEtatFormule(sub)
+  const refus = refusPendantChangement(e, geste, Date.now())
+  if (refus) throw new Error(`Changement de formule prevu : ${geste} refuse(e) tant qu'il n'est pas annule.`)
+  if (!e.changement) return sub
+  await stripePost(cleEcriture(), `/v1/subscription_schedules/${e.changement.schedule}/release`, {})
+  return stripeGet(cleEcriture(), `/v1/subscriptions/${abonnementId}?expand[]=latest_invoice`)
+}
+
+export type IssueChangement = { vers: VersFormule; effetSec: number; schedule: string; abonnement: AbonnementResume }
+
+/** Relache un calendrier sans jeter (retour arriere apres un echec). */
+async function relacherSansJeter(schedule: string): Promise<void> {
+  try {
+    await stripePost(cleEcriture(), `/v1/subscription_schedules/${schedule}/release`, {})
+  } catch (err) {
+    console.warn(`[liveclub/stripe] calendrier ${schedule} non relache : ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
+/**
+ * Programme le changement de formule, APRES le clic du membre. Relit
+ * l'abonnement EN DIRECT et rejoue la regle (decisionChangement), puis :
+ * 1. POST /v1/subscription_schedules { from_subscription } ;
+ * 2. verifie que la phase en cours finit bien a la date d'effet annoncee ;
+ * 3. POST /v1/subscription_schedules/{id} : phase en cours recopiee jusqu'a la
+ *    date d'effet, puis le prix cible, release, sans prorata ;
+ * 4. metadonnees sur l'abonnement (changement_formule_par = bot-live-club,
+ *    sens, date de la demande, date d'effet, calendrier).
+ * Un echec apres l'etape 1 relache le calendrier : l'abonnement reste comme
+ * avant. Jette sur un refus ou une panne : l'appelant journalise.
+ */
+export async function programmerChangementFormule(abonnementId: string, vers: VersFormule, maintenantMs: number = Date.now()): Promise<IssueChangement> {
+  let sub = await abonnementVivant(abonnementId)
+  // Notre calendrier d'un changement deja passe (sens inverse plus tard) : relache d'abord.
+  const avant = lireEtatFormule(sub, maintenantMs)
+  if (avant.changement && avant.changement.effetSec * 1000 <= maintenantMs) {
+    await stripePost(cleEcriture(), `/v1/subscription_schedules/${avant.changement.schedule}/release`, {})
+    sub = await stripeGet(cleEcriture(), `/v1/subscriptions/${abonnementId}?expand[]=latest_invoice`)
+  }
+  const d = decisionChangement(lireEtatFormule(sub, maintenantMs), vers, { maintenantMs })
+  if (!d.ok) throw new Error(`Changement de formule refuse a la relecture (${d.motif}).`)
+
+  const cle = cleEcriture()
+  const sch = await stripePost(cle, '/v1/subscription_schedules', { from_subscription: abonnementId })
+  const scheduleId = String(sch.id ?? '')
+  if (!/^sub_sched_[A-Za-z0-9]+$/.test(scheduleId)) throw new Error('Stripe a rendu un calendrier sans identifiant.')
+  try {
+    const phase = (Array.isArray(sch.phases) ? sch.phases[0] : undefined) as Record<string, unknown> | undefined
+    if (!phaseCouranteConforme(phase, d.effetSec)) throw new Error("La phase en cours du calendrier ne finit pas a la date d'effet calculee.")
+    const meta = metadonneesChangement(d, scheduleId, new Date(maintenantMs))
+    await stripePost(cle, `/v1/subscription_schedules/${scheduleId}`, corpsCalendrierChangement(phase as Record<string, unknown>, d, meta))
+    const metaSub: Record<string, string> = { 'expand[]': 'latest_invoice' }
+    for (const [k, v] of Object.entries(meta)) metaSub[`metadata[${k}]`] = v
+    const apres = await stripePost(cle, `/v1/subscriptions/${abonnementId}`, metaSub)
+    return { vers: d.vers, effetSec: d.effetSec, schedule: scheduleId, abonnement: await resumeOuErreur(apres) }
+  } catch (err) {
+    await relacherSansJeter(scheduleId)
+    throw err
+  }
+}
+
+/**
+ * Annule notre changement prevu (regle 3), APRES le clic : relit
+ * l'abonnement, relache le calendrier (la formule actuelle continue), puis
+ * efface nos metadonnees. Jette sur un refus ou une panne.
+ */
+export async function annulerChangementFormule(abonnementId: string, maintenantMs: number = Date.now()): Promise<IssueChangement> {
+  const sub = await abonnementVivant(abonnementId)
+  const d = decisionAnnulationChangement(lireEtatFormule(sub, maintenantMs), maintenantMs)
+  if (!d.ok) throw new Error(`Annulation du changement refusee a la relecture (${d.motif}).`)
+  const cle = cleEcriture()
+  await stripePost(cle, `/v1/subscription_schedules/${d.schedule}/release`, {})
+  const apres = await stripePost(cle, `/v1/subscriptions/${abonnementId}`, { ...effacementMetadonneesChangement(), 'expand[]': 'latest_invoice' })
+  return { vers: d.vers, effetSec: d.effetSec, schedule: d.schedule, abonnement: await resumeOuErreur(apres) }
+}
+
 /** Arret a la fin de la periode payee (cancel_at_period_end=true). Le statut reste 'active' jusque-la. */
 export async function programmerArret(abonnementId: string): Promise<AbonnementResume> {
-  await abonnementVivant(abonnementId)
+  // (27/11) Un changement de formule prevu bloque l'arret ; un changement passe est relache d'abord.
+  await libererChangementPasse(abonnementId, await abonnementVivant(abonnementId), 'arret')
   const sub = await stripePost(cleEcriture(), `/v1/subscriptions/${abonnementId}`, {
     cancel_at_period_end: 'true', 'expand[]': 'latest_invoice',
   })
@@ -416,7 +513,8 @@ export type IssuePause = {
  */
 export async function pauser(abonnementId: string, nbMois: number): Promise<IssuePause> {
   if (!nbMoisPauseValide(nbMois)) throw new Error('Duree de pause : un nombre entier de mois, de 1 a 6.')
-  const sub = await abonnementVivant(abonnementId)
+  // (27/11) Un changement de formule prevu bloque la pause ; un changement passe est relache d'abord.
+  const sub = await libererChangementPasse(abonnementId, await abonnementVivant(abonnementId), 'pause')
   const avant = await resumeOuErreur(sub)
   if (avant.pauseActive) throw new Error('Une pause est deja posee sur cet abonnement.')
   if (avant.arretPrevu) throw new Error("Un arret est programme : il faut l'annuler avant de poser une pause.")

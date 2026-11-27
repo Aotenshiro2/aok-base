@@ -106,6 +106,9 @@ const TYPE_PAR_OUTIL: Record<string, ActionMembre['type']> = {
   proposer_pause: 'pause',
   proposer_arret: 'arret',
   proposer_annuler_arret: 'annuler_arret',
+  // (27/11) Le changement de formule (changement-formule-pur.ts).
+  proposer_changement_formule: 'changement_formule',
+  proposer_annuler_changement: 'annuler_changement',
 }
 
 export type ReponseAgentMembre = {
@@ -438,7 +441,9 @@ async function boucleAgentMembre(
       // Le nombre de mois vient du modele : il est revalide par preparerAction
       // (entier 1 a 6), comme tout ce qui sort d'un texte.
       const nbMois = type === 'pause' ? Number((bloc.input as { nb_mois?: unknown })?.nb_mois) : undefined
-      const prep = await preparerAction(telegramId, type, nbMois)
+      // (27/11) La formule visee vient du modele : revalidee par la regle pure (mensuel ou forfait_3_mois).
+      const vers = type === 'changement_formule' ? (bloc.input as { vers?: unknown })?.vers : undefined
+      const prep = await preparerAction(telegramId, type, nbMois, vers)
       if (!prep.ok) {
         // Seule l'equipe peut le faire (plusieurs abonnements, pause a
         // changer, paiement en retard) : l'agent transmet lui-meme (Brice,

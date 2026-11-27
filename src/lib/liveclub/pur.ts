@@ -173,6 +173,108 @@ export type AbonnementResume = {
    * stripe.ts (completerImpaye), jamais par resumerAbonnement. Voir etatImpaye.
    */
   impaye?: Impaye | 'illisible'
+  /**
+   * (27/11) Ce qu'il faut pour un changement de formule (forfait de 3 mois
+   * vers mensuel, changement-formule-pur.ts) : formule, lignes, essai,
+   * calendrier Stripe et changement deja prevu par le bot. Pose par
+   * resumerAbonnement ; absent d'un resume construit a la main.
+   */
+  formule?: EtatFormule
+}
+
+// ---------------------------------------------------------------------------
+// (27/11, Brice) Le CHANGEMENT DE FORMULE du Live Club : la lecture brute de
+// l'abonnement vit ici (resumerAbonnement la pose), la regle et les textes
+// dans changement-formule-pur.ts, qui importe ce module (pas l'inverse).
+// ---------------------------------------------------------------------------
+
+export type FormuleLiveClub = 'mensuel' | 'forfait_3_mois' | 'autre'
+export type VersFormule = 'mensuel' | 'forfait_3_mois'
+
+/** Signature posee par le bot sur l'abonnement et sur son calendrier (metadata). */
+export const CHANGEMENT_PAR_BOT = 'bot-live-club'
+export const META_CHANGEMENT_PAR = 'changement_formule_par'
+export const META_CHANGEMENT_SENS = 'changement_formule_sens'
+export const META_CHANGEMENT_DEMANDE = 'changement_formule_demande_le'
+export const META_CHANGEMENT_EFFET = 'changement_formule_effet'
+export const META_CHANGEMENT_SCHEDULE = 'changement_formule_schedule'
+
+export const SENS_CHANGEMENT: Readonly<Record<VersFormule, string>> = {
+  mensuel: 'forfait_3_mois_vers_mensuel',
+  forfait_3_mois: 'mensuel_vers_forfait_3_mois',
+}
+
+export type ChangementFormulePrevu = {
+  vers: VersFormule
+  /** Date d'effet (secondes) : fin de la periode payee, essai compris. */
+  effetSec: number
+  /** Le calendrier Stripe (sub_sched_...) pose par le bot. */
+  schedule: string
+  demandeLe: string | null
+}
+
+export type EtatFormule = {
+  statut: string
+  /** Nombre de lignes (items) de l'abonnement. */
+  nbLignes: number
+  /** Produits de toutes les lignes. */
+  produits: string[]
+  formule: FormuleLiveClub
+  /** current_period_end (items, sinon racine), en secondes. */
+  finPeriodeSec: number | null
+  /** trial_end, en secondes, s'il est pose (jours reportes par le passage de 8 h). */
+  trialEndSec: number | null
+  /** Le calendrier Stripe attache a l'abonnement (subscription.schedule), s'il y en a un. */
+  schedule: string | null
+  /** Notre changement : nos metadonnees ET le meme calendrier toujours attache. null sinon. */
+  changement: ChangementFormulePrevu | null
+  arretPrevu: boolean
+  pauseActive: boolean
+}
+
+function idDe(x: unknown): string | null {
+  if (typeof x === 'string' && x) return x
+  const id = (x as { id?: unknown } | null | undefined)?.id
+  return typeof id === 'string' && id ? id : null
+}
+
+/** La formule d'apres la periode du prix de la premiere ligne : mois = mensuel, 3 mois = forfait. */
+export function formuleDuPrix(recurring: unknown): FormuleLiveClub {
+  const r = recurring as { interval?: unknown; interval_count?: unknown } | null | undefined
+  if (r?.interval !== 'month') return 'autre'
+  const n = r.interval_count ?? 1
+  return n === 1 ? 'mensuel' : n === 3 ? 'forfait_3_mois' : 'autre'
+}
+
+/** Lecture brute d'un abonnement Stripe pour le changement de formule. Pure. */
+export function lireEtatFormule(sub: Record<string, unknown>, maintenantMs: number = Date.now()): EtatFormule {
+  const items = (sub.items as { data?: { price?: { product?: unknown; recurring?: unknown } | null }[] } | undefined)?.data ?? []
+  const produits = items.map(i => idDe(i.price?.product)).filter((p): p is string => Boolean(p))
+  const pause = sub.pause_collection as { resumes_at?: number | null } | null | undefined
+  const schedule = idDe(sub.schedule)
+  const meta = (sub.metadata && typeof sub.metadata === 'object' ? sub.metadata : {}) as Record<string, unknown>
+  let changement: ChangementFormulePrevu | null = null
+  const sens = String(meta[META_CHANGEMENT_SENS] ?? '')
+  const vers = (Object.keys(SENS_CHANGEMENT) as VersFormule[]).find(v => SENS_CHANGEMENT[v] === sens)
+  const effetMs = Date.parse(String(meta[META_CHANGEMENT_EFFET] ?? ''))
+  if (schedule && vers && meta[META_CHANGEMENT_PAR] === CHANGEMENT_PAR_BOT
+    && meta[META_CHANGEMENT_SCHEDULE] === schedule && Number.isFinite(effetMs)) {
+    const demande = meta[META_CHANGEMENT_DEMANDE]
+    changement = { vers, effetSec: Math.floor(effetMs / 1000), schedule, demandeLe: typeof demande === 'string' && demande ? demande : null }
+  }
+  const trial = typeof sub.trial_end === 'number' && sub.trial_end > 0 ? sub.trial_end : null
+  return {
+    statut: String(sub.status ?? ''),
+    nbLignes: items.length,
+    produits,
+    formule: items.length ? formuleDuPrix(items[0]?.price?.recurring) : 'autre',
+    finPeriodeSec: finPeriodeAbonnement(sub),
+    trialEndSec: trial,
+    schedule,
+    changement,
+    arretPrevu: sub.cancel_at_period_end === true || typeof sub.cancel_at === 'number',
+    pauseActive: Boolean(pause) && (pause?.resumes_at == null || pause.resumes_at * 1000 > maintenantMs),
+  }
 }
 
 function isoDepuisSec(s: unknown): string | null {
@@ -539,6 +641,7 @@ export function resumerAbonnement(
     prelevementAuto: sub.collection_method !== 'send_invoice',
     debutLe: isoDepuisSec(sub.start_date) ?? isoDepuisSec(sub.created),
     creeLe: isoDepuisSec(sub.created),
+    formule: lireEtatFormule(sub),
   }
 }
 
@@ -1405,6 +1508,14 @@ export function phraseGeste(g: GesteLu): string | null {
     }
     case 'arret_annule':
       return fait ? "Arrêt annulé : l'abonnement continue." : 'Annulation de l\'arrêt non faite.'
+    // (27/11) Le changement de formule demande par le membre (changement-formule-pur.ts).
+    case 'changement_formule': {
+      const effet = date('effet_le')
+      const versMois = d.sens === 'forfait_3_mois_vers_mensuel'
+      if (d.etape === 'annulation') return fait ? 'Changement de formule annulé : l\'abonnement garde sa formule.' : 'Annulation du changement de formule non faite.'
+      if (!fait) return 'Changement de formule non programmé.'
+      return `Changement de formule programmé : ${versMois ? 'passage au mois' : 'passage au forfait de 3 mois'}${effet ? ` le ${effet}` : ''}.`
+    }
     case 'reprise':
       if (!fait) return regle === 'pause_sans_reprise' ? 'Pause sans date de reprise : pas de retour automatique.' : 'Retour après la pause non fait.'
       if (regle === 'pause_deja_revenu') return 'Retour après la pause : déjà revenu dans le groupe.'

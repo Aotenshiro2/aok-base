@@ -34,12 +34,19 @@ import { rattachementActif, type Rattachement } from './rattacher'
 import {
   abonnementsLiveClubDuClient, clientsStripeParEmail, lireAbonnement,
   pauser, programmerArret, annulerArret, apercuProchaineFacture, facturesOuvertesAbonnement,
+  programmerChangementFormule, annulerChangementFormule,
   type AbonnementResume,
 } from './stripe'
+// (27/11) Le changement de formule (forfait de 3 mois vers mensuel ; le sens montant est coupe).
+import {
+  decisionAnnulationChangement, decisionChangement, faitsChangementPrevu, phraseChangementPrevu, refusPendantChangement,
+  texteAnnulationFaite, texteChangementFait, texteConfirmationAnnulation, texteConfirmationChangement, versFormuleValide,
+  type VersFormule,
+} from './changement-formule-pur'
 import {
   abonnementOuvreLeGroupe, accesSansAbonnement, calculerReprisePause, enRetardDePaiement, etatImpaye, faitsImpaye, faitsMontants,
   formaterDateFr, messageErreur, nbMoisPauseValide, parcoursSansRattachement, peutAvoirUnImpaye, phraseImpaye, statutDonneDroit,
-  statutTermine, PHRASE_AUTRE_ADRESSE, ligneAdresses, normaliserEmail,
+  statutTermine, PHRASE_AUTRE_ADRESSE, ligneAdresses, normaliserEmail, SENS_CHANGEMENT,
   type AccesSansAbonnement, type EntreeImpaye, type EntreeMontants, type FaitsMontants,
 } from './pur'
 import type { ActionMembre } from './conversations'
@@ -137,6 +144,9 @@ function phraseAbonnement(a: AbonnementResume): string {
     return `Ton abonnement s'arrête${fin ? ` le ${fin}` : ' à la fin de la période en cours'} : rien ne sera plus prélevé. Tu gardes le groupe jusque-là, et tu peux encore changer d'avis.`
   }
   if (a.statut === 'active' || a.statut === 'trialing') {
+    // (27/11) Un changement de formule prevu : la formule visee et la date (regle 4).
+    const changement = phraseChangementPrevu(a.formule, Date.now())
+    if (changement) return `Ton abonnement Live Club est actif. ${changement}`
     return `Ton abonnement Live Club est actif.${fin ? ` Prochain renouvellement le ${fin}.` : ''}`
   }
   if (a.statut === 'past_due') {
@@ -227,6 +237,8 @@ export async function situationDuMembre(telegramId: number): Promise<Situation> 
           arret_programme: a.arretPrevu,
           pause_prevue_ou_en_cours: a.pauseActive,
           reprise_apres_pause: a.pauseJusquau ? formaterDateFr(a.pauseJusquau) : null,
+          // (27/11) Changement de formule prevu par le bot : vers quoi, quand.
+          ...faitsChangementPrevu(a.formule, Date.now()),
           // Impaye (Brice, 30/09) : groupe garde jusqu'a, ou montant et lien a regler.
           ...faitsImpaye(a),
         })),
@@ -402,6 +414,7 @@ export async function preparerAction(
   telegramId: number,
   type: ActionMembre['type'],
   nbMois?: number,
+  vers?: unknown,
 ): Promise<Preparation> {
   const r = await rattachementOuNull(telegramId)
   if (r === 'illisible' || !r) {
@@ -433,6 +446,27 @@ export async function preparerAction(
   const a = vivants[0]
   const fin = a.finPeriode ? formaterDateFr(a.finPeriode) : null
   const base = { abonnementId: a.id, clientStripe: a.clientStripe }
+  const maintenant = Date.now()
+
+  // (27/11) Le changement de formule (changement-formule-pur.ts) : la regle
+  // pure decide, le bouton dit la date d'effet (et le prix pour le mensuel).
+  if (type === 'changement_formule') {
+    if (!a.formule) return { ok: false, raison: PANNE, panne: true }
+    const d = decisionChangement(a.formule, vers, { maintenantMs: maintenant })
+    if (!d.ok) return d.motif === 'fin_inconnue' ? { ok: false, raison: PANNE, panne: true } : { ok: false, raison: d.raison }
+    return { ok: true, action: { ...base, type: 'changement_formule', vers: d.vers }, resume: texteConfirmationChangement(d) }
+  }
+  if (type === 'annuler_changement') {
+    if (!a.formule) return { ok: false, raison: PANNE, panne: true }
+    const d = decisionAnnulationChangement(a.formule, maintenant)
+    if (!d.ok) return { ok: false, raison: d.raison }
+    return { ok: true, action: { ...base, type: 'annuler_changement', vers: d.vers }, resume: texteConfirmationAnnulation(d) }
+  }
+  // (27/11, regle 6) Pause ou arret pendant un changement prevu : annuler le changement d'abord.
+  if ((type === 'pause' || type === 'arret') && a.formule) {
+    const bloque = refusPendantChangement(a.formule, type, maintenant)
+    if (bloque) return { ok: false, raison: bloque }
+  }
 
   if (type === 'pause') {
     const n = nbMois as number
@@ -493,6 +527,9 @@ const GESTE_PAR_ACTION: Record<ActionMembre['type'], GesteJournal> = {
   pause: 'pause',
   arret: 'arret',
   annuler_arret: 'arret_annule',
+  // (27/11) Les deux sens du changement de formule et son annulation : un seul geste, details.etape.
+  changement_formule: 'changement_formule',
+  annuler_changement: 'changement_formule',
 }
 
 /**
@@ -573,6 +610,31 @@ export async function executerActionMembre(
           + `Tu gardes le groupe jusque-là. Si tu changes d'avis avant, écris-moi, je peux annuler l'arrêt.`,
         equipe: false,
       }
+    }
+    // (27/11) Le changement de formule : la regle est rejouee sur l'abonnement relu (stripe.ts).
+    if (action.type === 'changement_formule') {
+      if (!versFormuleValide(action.vers)) throw new Error('formule visee absente de l action.')
+      const issue = await programmerChangementFormule(action.abonnementId, action.vers as VersFormule)
+      const effetLe = new Date(issue.effetSec * 1000).toISOString().slice(0, 10)
+      await journaliserGesteLiveClub(
+        {
+          geste, resultat: 'fait', regle: 'demande_membre',
+          details: { etape: 'programmation', sens: SENS_CHANGEMENT[issue.vers], effet_le: effetLe, calendrier: issue.schedule },
+        },
+        { ...contexte, membreId },
+      )
+      return { texte: texteChangementFait(issue), equipe: false }
+    }
+    if (action.type === 'annuler_changement') {
+      const issue = await annulerChangementFormule(action.abonnementId)
+      await journaliserGesteLiveClub(
+        {
+          geste, resultat: 'fait', regle: 'demande_membre',
+          details: { etape: 'annulation', sens: SENS_CHANGEMENT[issue.vers], effet_le: new Date(issue.effetSec * 1000).toISOString().slice(0, 10), calendrier: issue.schedule },
+        },
+        { ...contexte, membreId },
+      )
+      return { texte: texteAnnulationFaite(issue), equipe: false }
     }
     const apres = await annulerArret(action.abonnementId)
     await journaliserGesteLiveClub(

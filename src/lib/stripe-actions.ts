@@ -596,6 +596,8 @@ export type GesteJournal =
   | 'pause' | 'arret' | 'reprise' | 'rappel' | 'refus'
   | 'acces_broker' | 'arret_annule' | 'invitation' | 'fin_acces'
   | 'adresse' | 'compte_telegram'
+  // (27/11) Changement de formule du Live Club (migration 20261127120000).
+  | 'changement_formule'
 
 export type ResultatGeste = 'fait' | 'refuse' | 'echec' | 'simule'
 
