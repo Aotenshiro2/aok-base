@@ -9,7 +9,7 @@
 import { STATUTS_ABONNEMENT_ACTIF, estMarqueSoutien } from './soutien-pur'
 
 /** Les abonnements que le portail du compte AOKnowledge sait gerer. */
-export type AppAbonnement = 'duo' | 'pilotage' | 'carnet' | 'aok'
+export type AppAbonnement = 'duo-max' | 'carnet-max' | 'duo' | 'pilotage' | 'carnet' | 'aok'
 
 export type AbonnementVu = { app: AppAbonnement; soutien: boolean; client: string }
 
@@ -19,9 +19,12 @@ export type GroupePortail = { client: string; abonnements: string[] }
 /** Le retour du portail : la rubrique Achats de Mon espace. */
 export const RETOUR_PORTAIL = 'https://aoknowledge.com/mon-espace/parametres/achats'
 
-const ORDRE: readonly AppAbonnement[] = ['duo', 'pilotage', 'carnet', 'aok']
+const ORDRE: readonly AppAbonnement[] = ['duo-max', 'carnet-max', 'duo', 'pilotage', 'carnet', 'aok']
 
 export function libelleAbonnement(a: Pick<AbonnementVu, 'app' | 'soutien'>): string {
+  // (27/11/2026) Le Max, meme ligne de droit que Pilotage (academie_acces).
+  if (a.app === 'duo-max') return 'Duo Max (Carnet Max et Pilotage Premium)'
+  if (a.app === 'carnet-max') return 'Carnet Max'
   if (a.app === 'duo') return 'Premium Duo (Carnet et Pilotage)'
   if (a.app === 'pilotage') return a.soutien ? 'Soutien de Pilotage' : 'Pilotage Premium'
   if (a.app === 'carnet') return a.soutien ? 'Soutien du Carnet' : 'Carnet Premium'
@@ -66,7 +69,7 @@ const objet = (v: unknown): Record<string, unknown> => (v && typeof v === 'objec
  * Un abonnement Pilotage ou Duo relu chez Stripe (GET /v1/subscriptions/<id>) :
  * actif (actif, essai, impaye en relance), son client, sa marque soutien. Sinon null.
  */
-export function lireAbonnementPilotage(brut: unknown, app: 'duo' | 'pilotage'): AbonnementVu | null {
+export function lireAbonnementPilotage(brut: unknown, app: 'duo' | 'pilotage' | 'duo-max' | 'carnet-max'): AbonnementVu | null {
   const s = objet(brut)
   if (!(STATUTS_ABONNEMENT_ACTIF as readonly string[]).includes(String(s.status))) return null
   const client = typeof s.customer === 'string' ? s.customer : objet(s.customer).id

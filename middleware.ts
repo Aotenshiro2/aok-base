@@ -38,6 +38,7 @@ export async function middleware(request: NextRequest) {
   // /api/mcp/ : le connecteur MCP de ChatGPT pour Belrive, secret du chemin verifie dans la route (23/10/2026).
   // /api/club/paypal (+ /commande, /capturer) : le 10% Club paye par PayPal sans compte, commande relue chez PayPal (29/10/2026).
   // /api/pilotage/achat (+ /confirmer, /webhook) : abonnements de Pilotage sans compte exige, session et abonnement relus chez Stripe (30/10/2026).
+  // /api/max/achat : la vente du Carnet Max et du Duo Max (Checkout heberge), sans compte exige, coupon choisi par le serveur (27/11/2026).
   // /api/liveclub/resend : webhook Resend du Live Club (emails refuses), signature Svix verifiee dans la route, 503 sans son secret (31/10/2026).
   // /api/newsletter/subscribe : inscription juste apres la creation d'un compte (journal, extension Carnet), sans session ; garde dans newsletter-inscription-pur.ts (31/10/2026).
   // /api/kit/webhook/ : webhooks Kit des inscriptions par formulaire, secret du chemin verifie dans la route (31/10/2026).
@@ -46,7 +47,7 @@ export async function middleware(request: NextRequest) {
   // /api/cockpit/lien-magique (+ /ouvrir) : connexion au cockpit par lien avec toute adresse verifiee, sans session ; allowlist, adresse verifiee et cadence verifiees dans la route (05/11/2026).
   // /api/mcp-alex/ : le connecteur MCP de l'assistant d'Alex (indicateur), secret du chemin verifie dans la route (05/11/2026).
   // /api/coaching/cal : webhook du compte Cal de Brice (Mon coaching), signature X-Cal-Signature-256 verifiee dans la route, 503 sans son secret (09/11/2026).
-  const publicPaths = ['/auth', '/api/health', '/guide', '/api/membres/photo', '/api/academie/achat', '/api/academie/catalogue', '/api/academie/suivi', '/api/tab/', '/api/liveclub/stripe', '/api/liveclub/resend', '/api/mcp/', '/api/club/paypal', '/api/pilotage/achat', '/api/newsletter/subscribe', '/api/kit/webhook/', '/api/mcp-cockpit/', '/api/cockpit/lien-magique', '/api/mcp-alex/', '/api/coaching/cal']
+  const publicPaths = ['/auth', '/api/health', '/guide', '/api/membres/photo', '/api/academie/achat', '/api/academie/catalogue', '/api/academie/suivi', '/api/tab/', '/api/liveclub/stripe', '/api/liveclub/resend', '/api/mcp/', '/api/club/paypal', '/api/pilotage/achat', '/api/max/achat', '/api/newsletter/subscribe', '/api/kit/webhook/', '/api/mcp-cockpit/', '/api/cockpit/lien-magique', '/api/mcp-alex/', '/api/coaching/cal']
   // /api/besoins/signal : un signal de friction de nos outils, session facultative (empreinte du jour sans session) ; chemin EXACT, /api/besoins/signaler garde sa session (06/11/2026).
   // /api/academie/invitation : le lien personnel de l'email d'invitation des payants de Skool, sans session ; le jeton est verifie dans la route ; chemin EXACT (08/11/2026).
   // /api/academie/lives : le calendrier des lives, lisible sans compte (titres et horaires seulement) ; le lien ne part

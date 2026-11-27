@@ -72,6 +72,50 @@ export const estSlugPilotage = (v: unknown): v is SlugOffrePilotage =>
 export const produitDe = (slug: SlugOffrePilotage): ProduitPilotage => CATALOGUE[slug].produit
 
 // ---------------------------------------------------------------------------
+// Le Max (27/11/2026, chantier 2026-11-27_lancement-max) : Carnet Max et Duo
+// Max (Carnet Max + Pilotage Premium), vendus sur le meme Stripe Ao Knowledge.
+// Meme mecanique de droit que Pilotage (academie_acces, reference sub_...,
+// webhook /api/pilotage/achat/webhook), d'ou leur place ici ; la vente vit
+// dans max-pur.ts (/api/max/achat). Les constantes de Pilotage ci-dessus ne
+// changent pas : Pilotage ne vend pas le Max (offreDemandee l'ignore), et le
+// script de creation des produits de Pilotage ne le voit pas.
+// ---------------------------------------------------------------------------
+
+/** Les quatre offres du Max (academie_offres, type abonnement, canal stripe_aok). */
+export const OFFRES_MAX = ['carnet-max-mensuel', 'carnet-max-annuel', 'duo-max-mensuel', 'duo-max-annuel'] as const
+export type SlugOffreMax = (typeof OFFRES_MAX)[number]
+export type ProduitMax = 'carnet-max' | 'duo-max'
+
+/** Tout ce que le webhook des abonnements Ao Knowledge sait poser : Pilotage, Duo, et le Max. */
+export type SlugAbonnement = SlugOffrePilotage | SlugOffreMax
+export type ProduitAbonnement = ProduitPilotage | ProduitMax
+
+export const CATALOGUE_MAX: Record<SlugOffreMax, {
+  produit: ProduitMax; rythme: 'month' | 'year'; centimes: number; titre: string; libellePaiement: string
+}> = {
+  'carnet-max-mensuel': { produit: 'carnet-max', rythme: 'month', centimes: 1199, titre: 'Carnet Max (mensuel)', libellePaiement: 'Carnet Max : abonnement mensuel' },
+  'carnet-max-annuel': { produit: 'carnet-max', rythme: 'year', centimes: 11400, titre: 'Carnet Max (annuel)', libellePaiement: 'Carnet Max : abonnement annuel' },
+  'duo-max-mensuel': { produit: 'duo-max', rythme: 'month', centimes: 1499, titre: 'Duo Max, Carnet Max et Pilotage Premium (mensuel)', libellePaiement: 'Duo Max (Carnet Max + Pilotage Premium) : abonnement mensuel' },
+  'duo-max-annuel': { produit: 'duo-max', rythme: 'year', centimes: 12900, titre: 'Duo Max, Carnet Max et Pilotage Premium (annuel)', libellePaiement: 'Duo Max (Carnet Max + Pilotage Premium) : abonnement annuel' },
+}
+
+export const NOMS_PRODUITS_MAX: Record<ProduitMax, string> = {
+  'carnet-max': 'Carnet Max',
+  'duo-max': 'Duo Max (Carnet Max + Pilotage Premium)',
+}
+
+export const CATALOGUE_ABONNEMENTS: Record<SlugAbonnement, (typeof CATALOGUE)[SlugOffrePilotage] | (typeof CATALOGUE_MAX)[SlugOffreMax]> = { ...CATALOGUE, ...CATALOGUE_MAX }
+export const SLUGS_ABONNEMENTS: readonly SlugAbonnement[] = [...SLUGS_OFFRES_PILOTAGE, ...OFFRES_MAX]
+
+export const estSlugMax = (v: unknown): v is SlugOffreMax => typeof v === 'string' && (OFFRES_MAX as readonly string[]).includes(v)
+export const estSlugAbonnement = (v: unknown): v is SlugAbonnement => estSlugPilotage(v) || estSlugMax(v)
+export const produitAbonnementDe = (slug: SlugAbonnement): ProduitAbonnement => CATALOGUE_ABONNEMENTS[slug].produit
+
+/** Les produits qui ouvrent Pilotage Premium : Pilotage Premium, Premium Duo, Duo Max. Le Carnet Max seul non. */
+export const ouvrePilotage = (produit: string): boolean =>
+  produit === 'pilotage-premium' || produit === 'premium-duo' || produit === 'duo-max'
+
+// ---------------------------------------------------------------------------
 // Le palier
 // ---------------------------------------------------------------------------
 
@@ -88,11 +132,14 @@ export interface ResolutionPalier { palier: Palier; raison: string | null }
  */
 export function resoudrePalier(o: {
   sansPlafond: boolean
-  produits: readonly ProduitPilotage[]
+  produits: readonly ProduitAbonnement[]
   raisonCarnet: string | null
 }): ResolutionPalier {
   if (o.sansPlafond) return { palier: 'equipe', raison: 'equipe' }
-  if (o.produits.includes('premium-duo')) return { palier: 'premium', raison: 'premium-duo' }
+  // (27/11/2026) Le Duo Max ouvre Pilotage Premium : raison 'premium-duo', celle que
+  // l'app Pilotage publiee reconnait (« Ton palier » sur le Duo, rien a racheter).
+  // Le Carnet Max seul n'ouvre rien ici.
+  if (o.produits.includes('premium-duo') || o.produits.includes('duo-max')) return { palier: 'premium', raison: 'premium-duo' }
   if (o.produits.includes('pilotage-premium')) return { palier: 'premium', raison: 'pilotage-premium' }
   if (o.raisonCarnet && (RAISONS_CLUB_PILOTAGE as readonly string[]).includes(o.raisonCarnet)) {
     return { palier: 'premium', raison: o.raisonCarnet }
@@ -292,7 +339,7 @@ export function emailPropre(v: unknown): string | null {
 
 export type SessionLue =
   | {
-    ok: true; sessionId: string; abonnementId: string; offre: SlugOffrePilotage | null; userId: string | null; email: string | null; essai: boolean
+    ok: true; sessionId: string; abonnementId: string; offre: SlugAbonnement | null; userId: string | null; email: string | null; essai: boolean
     /** Le moment du paiement si l'acheteur a coche la case de retractation (consent.terms_of_service = 'accepted'), sinon null. */
     renonciationLe: Date | null
   }
@@ -302,7 +349,8 @@ export type SessionLue =
 export function lireSessionPilotage(s: Record<string, unknown>): SessionLue {
   const meta = objet(s.metadata)
   const id = chaine(s.id)
-  if (meta.source !== 'pilotage' || s.mode !== 'subscription' || !estSessionId(id)) return { ok: false, raison: 'pas_pilotage' }
+  // (27/11/2026) Le Max (source 'max', /api/max/achat) passe par le meme webhook et la meme ligne de droit.
+  if ((meta.source !== 'pilotage' && meta.source !== 'max') || s.mode !== 'subscription' || !estSessionId(id)) return { ok: false, raison: 'pas_pilotage' }
   if (s.status !== 'complete') return { ok: false, raison: 'incomplet' }
   if (s.payment_status !== 'paid' && s.payment_status !== 'no_payment_required') return { ok: false, raison: 'en_attente' }
   const abonnementId = idDe(s.subscription)
@@ -315,7 +363,7 @@ export function lireSessionPilotage(s: Record<string, unknown>): SessionLue {
     ok: true,
     sessionId: id,
     abonnementId,
-    offre: estSlugPilotage(meta.pilotage_offre) ? meta.pilotage_offre : null,
+    offre: estSlugAbonnement(meta.pilotage_offre) ? meta.pilotage_offre : null,
     userId: ref && UUID.test(ref) ? ref.toLowerCase() : null,
     email: emailPropre(details.email) ?? emailPropre(s.customer_email),
     essai: meta.essai === '1',
@@ -334,7 +382,7 @@ export type AbonnementLu = {
   /** Fin du droit : fin de la periode payee + MARGE_FIN_JOURS (null si Stripe ne la donne pas). */
   fin: Date | null
   /** L'offre : metadata pilotage_offre, sinon le prix reconnu (prixVersOffre). */
-  offre: SlugOffrePilotage | null
+  offre: SlugAbonnement | null
   prix: string | null
   clientId: string | null
   clientEmail: string | null
@@ -349,7 +397,7 @@ export type AbonnementLu = {
  * sur l'item depuis les versions recentes de l'API (2025-09-30.clover,
  * epinglee) ; l'ancien emplacement est lu aussi.
  */
-export function lireAbonnement(s: Record<string, unknown>, prixVersOffre: (prix: string) => SlugOffrePilotage | null = () => null): AbonnementLu | null {
+export function lireAbonnement(s: Record<string, unknown>, prixVersOffre: (prix: string) => SlugAbonnement | null = () => null): AbonnementLu | null {
   const id = chaine(s.id)
   if (!estAbonnementId(id)) return null
   const meta = objet(s.metadata)
@@ -365,7 +413,7 @@ export function lireAbonnement(s: Record<string, unknown>, prixVersOffre: (prix:
     statut,
     actif: (STATUTS_ACTIFS as readonly string[]).includes(statut),
     fin: finS === null ? null : new Date((finS + MARGE_FIN_JOURS * 86400) * 1000),
-    offre: estSlugPilotage(meta.pilotage_offre) ? meta.pilotage_offre : prix ? prixVersOffre(prix) : null,
+    offre: estSlugAbonnement(meta.pilotage_offre) ? meta.pilotage_offre : prix ? prixVersOffre(prix) : null,
     prix,
     clientId: idDe(client),
     clientEmail: emailPropre(objet(client).email),

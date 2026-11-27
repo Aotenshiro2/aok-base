@@ -10,8 +10,10 @@
 // cockpit », pas « a créé un compte ». Créer un compte ne coûte rien, donc un
 // niveau libre ouvert à tout compte authentifié est ouvert à Internet.
 import { prisma } from './db'
-import { checkMentoratAccess, type MentoratReason } from './entitlements'
+import { checkMentoratAccess, maxDuCompte, type MentoratReason } from './entitlements'
+import { niveauIADe, RAISONS_MAX } from './max-pur'
 
+/** 'club' est le niveau du MAX (27/11/2026) : la valeur reste 'club' cote API, l'extension publiee ne connait qu'elle (max-pur.ts). */
 export type NiveauIA = 'club' | 'premium' | 'libre' | 'aucun'
 
 export interface AccesIA {
@@ -24,7 +26,11 @@ export interface AccesIA {
   email: string | null
 }
 
-/** Les voies d'accès qui ouvrent le palier Club. skool-premium y est rangé
+/** Les voies d'adhésion (et l'équipe). Depuis le 27/11/2026 (lancement du Max),
+ *  elles donnent le PREMIUM, plus le niveau 'club' : le niveau 'club' est
+ *  celui du Max, qu'aucune offre n'inclut (niveauIADe, max-pur.ts). L'équipe
+ *  garde le niveau le plus haut. La liste sert toujours à Pilotage
+ *  (RAISONS_CLUB_PILOTAGE, recopiée). Historique : skool-premium y est rangé
  *  avec skool-vip : même niveau d'accès pour l'instant (tranché le 30/08).
  *  etm (statut posé depuis le cockpit, 09/09) ouvre le même palier sans
  *  être un abonnement Live Club. formation (pack 1 999 €, 18/10) aussi :
@@ -47,7 +53,14 @@ export async function resoudreNiveauIA(userId: string): Promise<AccesIA> {
   const email = acces.email
 
   if (acces.entitled && acces.reason) {
-    const niveau: NiveauIA = RAISONS_CLUB.includes(acces.reason) ? 'club' : 'premium'
+    // (27/11/2026) Le Max : un abonnement Carnet Max ou Duo Max actif. Lu a part quand la
+    // raison est une voie d'adhesion (elle passe avant le Max dans checkMentoratAccess,
+    // pour garder Pilotage Premium) ; illisible : le Premium, jamais un refus.
+    let max = (RAISONS_MAX as readonly string[]).includes(acces.reason)
+    if (!max && acces.reason !== 'equipe') {
+      max = await maxDuCompte(userId, email).then(m => m !== null).catch(() => false)
+    }
+    const niveau: NiveauIA = niveauIADe({ raison: acces.reason, max })
     return { niveau, capture: true, etude: true, raison: acces.reason, email }
   }
 

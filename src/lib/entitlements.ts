@@ -55,7 +55,30 @@ async function liveClubEnDirect(userId: string): Promise<EtatLu> {
 // Stripe aoknowledge) ouvre le même palier que 'carnet-premium'.
 // 'equipe' (09/11/2026) : le statut équipe AOK (profiles.role = 'admin',
 // estEquipe), qui ouvre ce qu'ouvre un abonnement actif, sans abonnement.
-export type MentoratReason = 'equipe' | 'etm' | 'manuel' | 'liveclub' | 'skool-vip' | 'skool-premium' | 'formation' | 'duo' | 'carnet-premium'
+// 'carnet-max' et 'duo-max' (27/11/2026, lancement du Max) : un abonnement Max
+// actif (ligne academie_acces posee par le webhook des abonnements), le niveau
+// 'club' du Carnet (ia-niveau.ts). Le Duo Max ouvre aussi Pilotage Premium, lu
+// par l'abonnement (pilotage-niveau.ts).
+export type MentoratReason = 'equipe' | 'etm' | 'manuel' | 'liveclub' | 'skool-vip' | 'skool-premium' | 'formation' | 'carnet-max' | 'duo-max' | 'duo' | 'carnet-premium'
+
+/**
+ * L'abonnement Max actif du compte (Duo Max d'abord), par le compte ou un
+ * email : la ligne academie_acces des offres carnet-max-* et duo-max-*, lue
+ * comme le Duo (non retiree, commencee, fin future). Sinon null. Jette si la
+ * base est illisible.
+ */
+export async function maxDuCompte(userId: string, email: string | null): Promise<'carnet-max' | 'duo-max' | null> {
+  const rows = await prisma.$queryRaw<{ slug: string }[]>`
+    select o.slug
+    from academie_acces a
+    join academie_offres o on o.id = a.offre_id
+    where o.slug in ('carnet-max-mensuel', 'carnet-max-annuel', 'duo-max-mensuel', 'duo-max-annuel')
+      and a.retire_le is null and a.debut <= now() and (a.fin is null or a.fin > now())
+      and (a.user_id = ${userId}::uuid or a.email = ${email ?? ''})
+  `
+  if (rows.some(r => r.slug.startsWith('duo-max'))) return 'duo-max'
+  return rows.length > 0 ? 'carnet-max' : null
+}
 
 // Le produit « Carnet Premium » (5,99 €/mois) sur le Stripe aoknowledge,
 // créé le 28/08/2026. La vérification en direct donne l'accès IMMÉDIAT après
@@ -344,6 +367,14 @@ export async function checkMentoratAccess(userId: string): Promise<MentoratAcces
     limit 1
   `
   if (pack.length > 0) return { entitled: true, reason: 'formation', email }
+
+  // 2 bis bis. (27/11/2026) Le Max (Carnet Max ou Duo Max), APRES les voies
+  // d'adhesion expres : un membre qui achete le Max garde sa raison (elle ouvre
+  // Pilotage Premium), et ia-niveau.ts lui donne le niveau du Max a part.
+  // Comme le Carnet Premium plus bas : un Carnet Max dont le Live Club n'est vu qu'en direct garde 'liveclub'.
+  const max = await maxDuCompte(userId, email)
+  if (max === 'carnet-max' && (await liveClubEnDirect(userId)) === 'oui') return { entitled: true, reason: 'liveclub', email }
+  if (max) return { entitled: true, reason: max, email }
 
   // 2 ter. L'abonnement Premium Duo (brief E1, 30/10/2026) : le Carnet Premium
   // et Pilotage Premium. Le droit est une ligne academie_acces posée par la

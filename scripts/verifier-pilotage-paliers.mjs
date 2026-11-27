@@ -176,7 +176,8 @@ bloc('Duo : raison duo dans entitlements (meme palier que carnet-premium), pas u
   assert.deepEqual([...P.SLUGS_DUO], ['premium-duo-mensuel', 'premium-duo-annuel'])
   // ia-niveau : hors RAISONS_CLUB, donc palier premium du Carnet (comme carnet-premium).
   const niv = lire('../src/lib/ia-niveau.ts')
-  assert.match(niv, /const niveau: NiveauIA = RAISONS_CLUB\.includes\(acces\.reason\) \? 'club' : 'premium'/)
+  // (27/11/2026) Le niveau 'club' est celui du Max : niveauIADe (max-pur.ts), 'duo' y reste premium.
+  assert.match(niv, /const niveau: NiveauIA = niveauIADe\(\{ raison: acces\.reason, max \}\)/)
   assert.ok(!/RAISONS_CLUB[^\n]*'duo'/.test(niv))
   assert.match(lire('../src/lib/academie/droits.ts'), /Exclude<MentoratReason, 'carnet-premium' \| 'duo'>/)
 })
@@ -307,7 +308,8 @@ bloc('controle statique : lectures et abonnements bornes au userId du jeton ; ro
   for (const ev of ['checkout.session.completed', 'invoice.paid', 'customer.subscription.updated', 'customer.subscription.deleted']) assert.ok(wh.includes(`'${ev}'`), ev)
   // Le middleware : les trois routes d'achat sont publiques, pas niveau.
   const mw = lire('../middleware.ts')
-  assert.match(mw, /'\/api\/pilotage\/achat'\]/)
+  // (27/11/2026) La liste a grandi apres cette route : on verifie qu'elle est dans publicPaths, pas qu'elle la termine.
+  assert.match(mw, /const publicPaths = \[[^\]]*'\/api\/pilotage\/achat'/)
   assert.ok(!mw.includes("'/api/pilotage/niveau'"))
   // La migration : aucun point-virgule dans les commentaires ni dans les chaines (appliquer-migration.sh decoupe dessus).
   const sql = lire('../../../sites/Aoknowledgecom/supabase/migrations/20261031120000_pilotage_offres.sql')

@@ -36,7 +36,7 @@ function borne<T>(p: Promise<T>): Promise<T | undefined> {
   ])
 }
 
-async function abonnementPilotage(cle: string, reference: string, app: 'duo' | 'pilotage'): Promise<AbonnementVu | null> {
+async function abonnementPilotage(cle: string, reference: string, app: 'duo' | 'pilotage' | 'duo-max' | 'carnet-max'): Promise<AbonnementVu | null> {
   try {
     return lireAbonnementPilotage(await appeler(cle, `/v1/subscriptions/${encodeURIComponent(reference)}`), app)
   } catch (err) {
@@ -62,7 +62,8 @@ export async function abonnementsDuCompte(userId: string): Promise<AbonnementsDu
   let incomplet = acces === undefined
   for (const a of (acces ?? []).filter(x => x.reference?.startsWith('sub_')).slice(0, MAX_PILOTAGE)) {
     if (!cle) { incomplet = true; break }
-    lectures.push(borne(abonnementPilotage(cle, a.reference as string, a.produit === 'premium-duo' ? 'duo' : 'pilotage')))
+    const app = a.produit === 'premium-duo' ? 'duo' : a.produit === 'duo-max' || a.produit === 'carnet-max' ? a.produit : 'pilotage'
+    lectures.push(borne(abonnementPilotage(cle, a.reference as string, app)))
   }
 
   // Carnet Premium et soutien AOKnowledge : les clients de chaque adresse.

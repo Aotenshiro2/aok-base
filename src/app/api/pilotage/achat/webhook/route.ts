@@ -20,6 +20,12 @@ import { evenementEnvoieMail } from '@/lib/mails-achat-pur'
  *   customer.subscription.deleted : droit retire (retire_le, rien ne s'efface).
  * Ce qui n'est pas un abonnement de Pilotage est ignore (200). 500 = Stripe renvoie plus tard.
  *
+ * Le Max (27/11/2026, /api/max/achat, metadata source 'max') passe par ici aussi :
+ * meme ligne academie_acces (offres carnet-max-* et duo-max-*), ouverte a l'achat,
+ * avancee au renouvellement, retiree a la fin de l'abonnement, avec le montant
+ * reellement paye (synchroniserAbonnement). Pas de mail d'achat pour le Max
+ * (aucun modele : produitDeOffrePilotage rend null, 'pas_concerne').
+ *
  * Mails d'achat (brief F1, 30/10/2026, mails-achat.ts) : checkout.session.completed
  * SEULEMENT (jamais un renouvellement), une fois par abonnement (anti-doublon
  * en base). Le point d'acces recoit les sessions de tout le compte : une
@@ -62,7 +68,8 @@ export async function POST(req: NextRequest) {
     if (type === 'checkout.session.completed') {
       const meta = (objet.metadata ?? {}) as Record<string, unknown>
       if (!estSessionId(objet.id)) return NextResponse.json({ ok: true, ignore: true })
-      if (meta.source !== 'pilotage') {
+      // (27/11/2026) source 'max' : Carnet Max et Duo Max (/api/max/achat), meme droit que Pilotage.
+      if (meta.source !== 'pilotage' && meta.source !== 'max') {
         // Hors Pilotage : peut-etre un Carnet Premium (mail seulement, aucun droit ecrit).
         if (objet.mode !== 'subscription' || meta.source) return NextResponse.json({ ok: true, ignore: true })
         const mail = await mailAchatCarnet(cle, await lireSessionCheckout(cle, objet.id))

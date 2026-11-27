@@ -17,7 +17,7 @@ import { octetsDuCoffre } from '@/lib/documents-serveur'
 import { abonnementsDuMembre, abonnementVu, type AbonnementActif, clePilotage, ventePubliquePilotage } from '@/lib/pilotage-abonnement'
 import { raisonAvecSoutien, soutienOuvert } from '@/lib/soutien-pur'
 import {
-  COFFRE_PAR_PALIER, TARIFS, compterLectures, debutDesLectures, quotaDe, resoudrePalier,
+  COFFRE_PAR_PALIER, TARIFS, compterLectures, debutDesLectures, ouvrePilotage, quotaDe, resoudrePalier,
   type Compteur, type Palier,
 } from '@/lib/pilotage-paliers'
 
@@ -39,11 +39,13 @@ export async function palierDuMembre(userId: string): Promise<PalierMembre> {
   const admin = sansPlafond || ident?.role === 'admin'
   if (sansPlafond) return { ...resoudrePalier({ sansPlafond, produits: [], raisonCarnet: null }), emails, admin, abonnement: null }
 
-  const abonnements = await abonnementsDuMembre(userId, emails)
+  // (27/11/2026) Seuls les abonnements qui ouvrent Pilotage comptent ici (Pilotage Premium, Duo, Duo Max) :
+  // un Carnet Max seul laisse la raison du Carnet decider (un membre du Live Club garde son Premium).
+  const abonnements = (await abonnementsDuMembre(userId, emails)).filter(a => ouvrePilotage(a.produit))
   const raisonCarnet = abonnements.length ? null : (await checkMentoratAccess(userId)).reason
   const r = resoudrePalier({ sansPlafond, produits: abonnements.map(a => a.produit), raisonCarnet })
   // Le Duo d'abord quand il y en a un (c'est lui que dit la raison).
-  const abonnement = abonnements.find(a => a.produit === 'premium-duo') ?? abonnements[0] ?? null
+  const abonnement = abonnements.find(a => a.produit === 'premium-duo' || a.produit === 'duo-max') ?? abonnements[0] ?? null
   return { ...r, emails, admin, abonnement }
 }
 

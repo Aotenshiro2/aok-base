@@ -21,7 +21,7 @@ import { Resend } from 'resend'
 import { prisma } from '@/lib/db'
 import { appeler } from '@/lib/academie/achat'
 import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
-import { CATALOGUE, MARGE_FIN_JOURS, type SlugOffrePilotage } from '@/lib/pilotage-paliers'
+import { CATALOGUE_ABONNEMENTS, MARGE_FIN_JOURS, type SlugAbonnement } from '@/lib/pilotage-paliers'
 import {
   SQL_LIBERER_MAIL, SQL_MAIL_PARTI, SQL_RESERVER_MAIL, SUPPORT_MAIL, cleMailAchat, envoyerUneFois, formaterDateLongue, formaterEuros,
   lienDuModule, lienPortailPropre, lireSessionPayee, planMailHorsPilotage, produitDeOffrePilotage, rendreMail, soutienDeLAchat,
@@ -94,7 +94,7 @@ export async function envoyerMailAchat(produit: ProduitMail, reference: string, 
  * periode + MARGE_FIN_JOURS).
  */
 export async function mailAchatPilotage(p: {
-  session: Record<string, unknown>; abonnementId: string; slug: SlugOffrePilotage; email: string | null; essai: boolean; fin: Date | null
+  session: Record<string, unknown>; abonnementId: string; slug: SlugAbonnement; email: string | null; essai: boolean; fin: Date | null
   /** L'abonnement relu porte soutien=1 (synchroniserAbonnement). */
   soutien?: boolean
 }): Promise<IssueMail> {
@@ -113,8 +113,8 @@ export async function mailAchatPilotage(p: {
   const finPeriode = p.fin ? new Date(p.fin.getTime() - MARGE_FIN_JOURS * 86400 * 1000) : null
   return envoyerMailAchat(produit, p.abonnementId, {
     prenom: s.prenom,
-    offre: CATALOGUE[p.slug].titre,
-    montant: formaterEuros(s.centimes ?? CATALOGUE[p.slug].centimes),
+    offre: CATALOGUE_ABONNEMENTS[p.slug].titre,
+    montant: formaterEuros(s.centimes ?? CATALOGUE_ABONNEMENTS[p.slug].centimes),
     prochaineEcheance: formaterDateLongue(finPeriode),
     lienPortail: lienPortail(),
     email,

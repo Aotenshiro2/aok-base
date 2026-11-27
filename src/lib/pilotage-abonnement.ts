@@ -25,13 +25,14 @@ import { appeler, appelerAvecRemise, cleAchat, ErreurStripe } from '@/lib/academ
 import type { RemiseCheckout } from '@/lib/code-promo-pur'
 import { messageErreur } from '@/lib/liveclub/pur'
 import {
-  CATALOGUE, SITE_PILOTAGE, SLUGS_OFFRES_PILOTAGE, chargeDesPaiements, corpsSessionAbonnement, estSlugPilotage, lireAbonnement, produitDe,
-  type ProduitPilotage, type SlugOffrePilotage,
+  CATALOGUE_ABONNEMENTS, SITE_PILOTAGE, SLUGS_ABONNEMENTS, chargeDesPaiements, corpsSessionAbonnement, estSlugAbonnement, estSlugMax, lireAbonnement, produitAbonnementDe,
+  type ProduitAbonnement, type SlugAbonnement, type SlugOffrePilotage,
 } from '@/lib/pilotage-paliers'
 import {
   SQL_ABONNEMENTS_DU_MEMBRE, SQL_FERMER_ABONNEMENT, SQL_POSER_ABONNEMENT, SQL_PRIX, SQL_RETIRER_ABONNEMENT,
 } from '@/lib/pilotage-requetes'
 import { estMarqueSoutien } from '@/lib/soutien-pur'
+import { montantPayeEur } from '@/lib/max-pur'
 
 export const ventePubliquePilotage = () => process.env.PILOTAGE_ACHAT_PUBLIC?.trim() === '1'
 export const secretWebhookPilotage = () => process.env.STRIPE_WEBHOOK_SECRET_PILOTAGE?.trim() || null
@@ -47,10 +48,10 @@ export const clePilotage = (): string | null => process.env.STRIPE_PILOTAGE_KEY_
 // ---------------------------------------------------------------------------
 
 /** Les prix Stripe connus en base, par slug. */
-export async function prixDesOffres(): Promise<Map<SlugOffrePilotage, string>> {
-  const lignes = await prisma.$queryRawUnsafe<{ slug: string; stripe_price_id: string | null }[]>(SQL_PRIX, [...SLUGS_OFFRES_PILOTAGE])
-  const m = new Map<SlugOffrePilotage, string>()
-  for (const l of lignes) if (estSlugPilotage(l.slug) && l.stripe_price_id) m.set(l.slug, l.stripe_price_id)
+export async function prixDesOffres(): Promise<Map<SlugAbonnement, string>> {
+  const lignes = await prisma.$queryRawUnsafe<{ slug: string; stripe_price_id: string | null }[]>(SQL_PRIX, [...SLUGS_ABONNEMENTS])
+  const m = new Map<SlugAbonnement, string>()
+  for (const l of lignes) if (estSlugAbonnement(l.slug) && l.stripe_price_id) m.set(l.slug, l.stripe_price_id)
   return m
 }
 
@@ -74,11 +75,11 @@ export async function lireSessionCheckout(cle: string, id: string): Promise<Reco
 
 export type Synchro =
   | {
-    ok: true; etat: 'ouvert'; slug: SlugOffrePilotage; cree: boolean; userId: string | null; email: string | null; essai: boolean; fin: Date
+    ok: true; etat: 'ouvert'; slug: SlugAbonnement; cree: boolean; userId: string | null; email: string | null; essai: boolean; fin: Date
     /** L'abonnement relu porte soutien=1 (11/11/2026) : le mail d'achat devient le remerciement. */
     soutien: boolean
   }
-  | { ok: true; etat: 'ferme' | 'retire'; slug: SlugOffrePilotage }
+  | { ok: true; etat: 'ferme' | 'retire'; slug: SlugAbonnement }
   | { ok: false; raison: 'pas_pilotage' | 'incomplet' | 'offre_inconnue' }
 
 /** La charge de la facture (invoice_payments), ou null. Sans la permission Invoices, null. */
@@ -92,6 +93,16 @@ async function chargeDeFacture(cle: string, facture: string): Promise<string | n
   }
 }
 
+/** Le montant paye de la facture (amount_paid), en euros ; null si illisible (le prix du catalogue sert alors). */
+async function montantDeFacture(cle: string, facture: string): Promise<number | null> {
+  try {
+    return montantPayeEur(await appeler(cle, `/v1/invoices/${encodeURIComponent(facture)}`))
+  } catch (err) {
+    console.warn(`[pilotage/achat] montant de la facture illisible, prix du catalogue : ${err instanceof ErreurStripe ? err.message : messageErreur(err)}`)
+    return null
+  }
+}
+
 /**
  * Le libelle du paiement : une charge d'abonnement arrive chez Stripe avec
  * « Subscription creation », que la collecte du cockpit ne sait pas classer.
@@ -99,10 +110,10 @@ async function chargeDeFacture(cle: string, facture: string): Promise<string | n
  * push_membres_supabase.py). Sans la permission Charges en ecriture : un
  * avertissement, le droit est pose quand meme.
  */
-async function nommerPaiement(cle: string, charge: string, slug: SlugOffrePilotage): Promise<void> {
+async function nommerPaiement(cle: string, charge: string, slug: SlugAbonnement): Promise<void> {
   if (!charge.startsWith('ch_')) return
   try {
-    await appeler(cle, `/v1/charges/${encodeURIComponent(charge)}`, new URLSearchParams({ description: CATALOGUE[slug].libellePaiement }))
+    await appeler(cle, `/v1/charges/${encodeURIComponent(charge)}`, new URLSearchParams({ description: CATALOGUE_ABONNEMENTS[slug].libellePaiement }))
   } catch (err) {
     console.warn(`[pilotage/achat] libelle du paiement non pose : ${err instanceof ErreurStripe ? err.message : messageErreur(err)}`)
   }
@@ -138,9 +149,14 @@ export async function synchroniserAbonnement(cle: string, abonnementId: string, 
   if (!userId && !email) return { ok: false, raison: 'incomplet' }
   const essai = extra.essai ?? ab.essai
   const charge = ab.facture ? await chargeDeFacture(cle, ab.facture) : null
+  // (27/11/2026) Le Max porte le montant REELLEMENT paye (facture la plus recente : -50 % ou -25 % la
+  // premiere periode, puis le prix plein). Pilotage et Duo gardent le prix du catalogue (BF26, Academie).
+  const montant = estSlugMax(ab.offre) && ab.facture
+    ? (await montantDeFacture(cle, ab.facture)) ?? CATALOGUE_ABONNEMENTS[ab.offre].centimes / 100
+    : CATALOGUE_ABONNEMENTS[ab.offre].centimes / 100
   const l = (await prisma.$queryRawUnsafe<{ offre_connue: number; cree: number; ecrit: number }[]>(
     SQL_POSER_ABONNEMENT,
-    userId, email, ab.offre, ab.id, CATALOGUE[ab.offre].centimes / 100, ab.fin, extra.renonciationLe ?? null,
+    userId, email, ab.offre, ab.id, montant, ab.fin, extra.renonciationLe ?? null,
     essai ? 'Abonnement test (?achat=essai), avant ouverture publique' : null,
     charge ? `stripe:${charge}` : null,
   ))[0]
@@ -153,14 +169,14 @@ export async function synchroniserAbonnement(cle: string, abonnementId: string, 
 // Le membre : ses abonnements, le portail
 // ---------------------------------------------------------------------------
 
-export type AbonnementActif = { slug: SlugOffrePilotage; produit: ProduitPilotage; reference: string | null }
+export type AbonnementActif = { slug: SlugAbonnement; produit: ProduitAbonnement; reference: string | null }
 
 /** Les abonnements Pilotage actifs du compte (par uuid ou email verifie). */
 export async function abonnementsDuMembre(userId: string, emails: string[]): Promise<AbonnementActif[]> {
   const lignes = await prisma.$queryRawUnsafe<{ slug: string; reference: string | null }[]>(
-    SQL_ABONNEMENTS_DU_MEMBRE, userId, emails, [...SLUGS_OFFRES_PILOTAGE],
+    SQL_ABONNEMENTS_DU_MEMBRE, userId, emails, [...SLUGS_ABONNEMENTS],
   )
-  return lignes.flatMap(l => (estSlugPilotage(l.slug) ? [{ slug: l.slug, produit: produitDe(l.slug), reference: l.reference }] : []))
+  return lignes.flatMap(l => (estSlugAbonnement(l.slug) ? [{ slug: l.slug, produit: produitAbonnementDe(l.slug), reference: l.reference }] : []))
 }
 
 /**

@@ -151,7 +151,10 @@ await bloc('cablage', () => {
   // raison 'liveclub' (elle ouvre Pilotage Premium) : le direct est relu dans le bloc carnet-premium, avant son return.
   const blocCarnet = fonction.slice(fonction.indexOf('if (await hasCarnetPremium(userId, email))'))
   assert.ok(blocCarnet.indexOf("(await liveClubEnDirect(userId)) === 'oui'") < blocCarnet.indexOf("reason: 'carnet-premium'"))
-  assert.ok(fonction.indexOf("reason: 'duo'") < fonction.indexOf('liveClubEnDirect(userId)'))
+  // (27/11/2026) Seule exception : le Carnet Max relit le direct pour garder 'liveclub', comme le Carnet Premium.
+  const avantDuo = fonction.slice(0, fonction.indexOf("reason: 'duo'"))
+  assert.equal(avantDuo.split('liveClubEnDirect(userId)').length - 1, 1)
+  assert.match(avantDuo, /if \(max === 'carnet-max' && \(await liveClubEnDirect\(userId\)\) === 'oui'\) return \{ entitled: true, reason: 'liveclub', email \}/)
   assert.match(fonction, /premiumParLiveClub\(\{ vue: m\?\.abonnement_en_cours, direct: await liveClubEnDirect\(userId\) \}\)\) \{\n\s+return \{ entitled: true, reason: 'liveclub', email \}/)
   // La vue reste lue.
   assert.match(fonction, /if \(m\.abonnement_en_cours\) return \{ entitled: true, reason: 'liveclub', email \}/)
