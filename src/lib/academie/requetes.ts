@@ -47,6 +47,11 @@ select
 /**
  * $1 = emails verifies (text[]). Ce que le cockpit sait de ces emails :
  * - etm : statut ETM actif (cockpit_statut_etm) ;
+ * - a_ete_etm (27/11/2026, tarif membre) : un statut ETM, actif OU retire
+ *   (retire_le rempli ou non). N'ouvre rien : le sens de etm ne change pas ;
+ * - formation_longue (27/11/2026, tarif membre) : un acces non retire a
+ *   l'offre formation-complete (le 10% Club), actif ou echu, par un de ces
+ *   emails ou un email d'une fiche du cockpit reliee. N'ouvre rien ;
  * - broker_jusquau : acces broker actif au Live Club (cockpit_liveclub_acces,
  *   meme filtre que droitLiveClub) ;
  * - manuel_jusquau : date d'acces posee a la main sur le membre
@@ -81,6 +86,24 @@ select
       join public.cockpit_membre_emails me on me.membre_id = s.membre_id
      where s.retire_le is null and lower(me.email) = any($1::text[])
   ) as etm,
+  exists (
+    select 1 from public.cockpit_statut_etm s
+      join public.cockpit_membre_emails me on me.membre_id = s.membre_id
+     where lower(me.email) = any($1::text[])
+  ) as a_ete_etm,
+  exists (
+    select 1 from public.academie_acces a
+      join public.academie_offres o on o.id = a.offre_id
+     where o.slug = 'formation-complete' and a.retire_le is null
+       and (
+         lower(btrim(a.email)) = any($1::text[])
+         or lower(btrim(a.email)) in (
+           select lower(btrim(autre.email)) from public.cockpit_membre_emails me
+             join public.cockpit_membre_emails autre on autre.membre_id = me.membre_id
+            where lower(me.email) = any($1::text[])
+         )
+       )
+  ) as formation_longue,
   exists (
     select 1 from public.cockpit_membre_emails me
       join public.cockpit_membres_etat e on e.membre_id = me.membre_id

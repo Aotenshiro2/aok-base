@@ -1,5 +1,23 @@
 # ETAT du journal d etudes
 
+## BLACK FRIDAY : BF26 AU PAIEMENT, PRIX MEMBRE ELARGI, PARTIES RESERVEES (27-28/11/2026 ; branche bf-paiements depuis origin/master 770aa89, poussee sur la branche SEULEMENT, PAS sur master : paiements, validation de Brice ; aucune migration)
+
+- BF26 (src/lib/code-promo-pur.ts) : sessions Checkout d'un module (corpsSession) et de Pilotage / Duo
+  (corpsSessionAbonnement) au prix courant, jusqu'a CODE_PROMO_JUSQUA (01/12/2026 0 h Paris, exclu) : discounts
+  PROMO_BF26 (promo_1UgU4LEAT4qWdUNVNqM26u27, coupon ZeN4oHT3 -25 % once). Jamais avec un tarif membre, en soutien, ni
+  pour un compte dont le Premium est compris (Pilotage, palierDuMembre, 5 s au plus). Stripe refuse la remise (400) :
+  session recreee avec allow_promotion_codes seul (appelerAvecRemise, achat.ts). STRIPE_PROMO_BF26=aucun : champ seul.
+  PayPal : jamais. Carnet Premium seul : Payment Links, rien ici (?prefilled_promo_code=BF26 cote URL).
+- Prix membre (membreDuTarif, membreHorsLiveClub) : Live Club actif OU formation longue (formation-complete, acces non
+  retire, par compte, email verifie ou email de la fiche cockpit : SQL_FAITS_COCKPIT.formation_longue) OU ETM actuel ou
+  ancien (a_ete_etm, retire_le ignore ; etm garde son sens). /moi, carte et PayPal passent par la meme regle.
+- Parties de module (ventePartie, 28/11, Brice) : module-...-partie-N vendues seulement a un compte au Live Club 'oui' ;
+  sinon 403 partie_reservee_membres { message } ; Live Club illisible 503 membre_inconnu. Carte et commande PayPal.
+- Verifs : verifier-prix-membre-profils (9 blocs, nouveau), -modules-membres-bf et -partie2-membres-bf (regex du
+  cablage mises a jour), -soutien, -achat-academie, -module-paypal, -parties-smt, -bonus-membres : ok. tsc et eslint
+  propres. verifier-pilotage-paliers et verifier-mails-achat echouent aussi sur master (middleware, chemin du site).
+- Pas lance : next build, aucun appel reel a Stripe.
+
 ## BOT LIVE CLUB : NE PLUS CONTACTER (27/11/2026, demande de Brice ; branche bot-ne-plus-contacter depuis origin/master f127b78, commitee NON poussee ; aucune migration)
 
 - La personne ECRIT qu'elle ne veut plus de nos messages : le bot le reconnait, pose le marqueur et confirme. Jamais

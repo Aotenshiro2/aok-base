@@ -3,9 +3,12 @@ import {
   cleAchat, clePublique, creerSession, emailConfirme, ErreurStripe, offreEnVente, offrePartieEnVente, ventePublique,
 } from '@/lib/academie/achat'
 import { offrePartie, retourSur, type OffreEnVente } from '@/lib/academie/achat-pur'
-import { prixDuCompte } from '@/lib/academie/prix-membre'
-import { achatAVerifier, ERREUR_MEMBRE_INCONNU, expirationSession, TEXTE_MEMBRE_INCONNU } from '@/lib/academie/prix-membre-pur'
+import { prixDuCompte, ventePartieDuCompte } from '@/lib/academie/prix-membre'
+import {
+  achatAVerifier, ERREUR_MEMBRE_INCONNU, ERREUR_PARTIE_RESERVEE, expirationSession, TEXTE_MEMBRE_INCONNU, TEXTE_PARTIE_RESERVEE,
+} from '@/lib/academie/prix-membre-pur'
 import { compteDuJeton, corsAcademie, entetesAcademie, refusAcademie, tronquer } from '@/lib/academie/http'
+import { libelleRemise, promoBf26, remiseCheckout } from '@/lib/code-promo-pur'
 import { messageErreur } from '@/lib/liveclub/pur'
 
 /**
@@ -31,6 +34,19 @@ import { messageErreur } from '@/lib/liveclub/pur'
  * (SQL_TARIFS_MEMBRES), se paie au stripe_price_id du tarif (prixDuCompte,
  * prix-membre.ts) ; la session expire au plus tard a la fin de la fenetre
  * (31 min au moins, minimum de Stripe). Le webhook ouvre l'offre de la partie.
+ * Qui est membre (27/11/2026, Brice) : Live Club actif, formation longue
+ * (formation-complete) achetee, ETM actuel ou ancien (membreDuTarif).
+ *
+ * Code promo (27/11/2026, Black Friday) : au prix courant, la session porte
+ * BF26 deja applique (discounts), a defaut le champ code promo
+ * (allow_promotion_codes), jusqu'a CODE_PROMO_JUSQUA (code-promo-pur.ts) ; avec
+ * un tarif membre, jamais (pas de cumul). Le code et ses produits eligibles
+ * sont dans Stripe ; s'il refuse la remise, la session est recreee avec le
+ * champ seul. Le montant enregistre est amount_total, donc apres remise.
+ *
+ * Parties (28/11/2026, Brice) : une offre de PARTIE ne se vend qu'a un compte
+ * connecte membre du Live Club (ventePartie) : sinon 403
+ * 'partie_reservee_membres' { message } ; Live Club illisible, 503 'membre_inconnu'.
  *
  * 200 { ok, client_secret, session_id, cle_publique }
  * 400 'corps' | 403 'ferme' | 404 'module' (pas en vente) | 503 'config' (cle absente ou sans permission) | 502 'stripe'
@@ -93,6 +109,18 @@ export async function POST(req: NextRequest) {
   if (!offre) return refus('module', 404)
   const prixCourant = typeof offre.prixEur === 'number' && Number.isFinite(offre.prixEur) ? offre.prixEur : null
 
+  // (28/11/2026, Brice) Une PARTIE de module ne se vend qu'a un membre du Live Club (ventePartie) : sans compte ou sans
+  // Live Club actif, 403 'partie_reservee_membres' ; Live Club illisible, 503 'membre_inconnu' (reessayer).
+  const vente = await ventePartieDuCompte(userId, offre.offreSlug)
+  if (vente.decision === 'reservee') {
+    console.info(`[academie/achat] partie reservee aux membres offre=${offre.offreSlug} compte=${userId ? tronquer(userId) : 'aucun'}`)
+    return refusAcademie(ERREUR_PARTIE_RESERVEE, 403, headers, { message: TEXTE_PARTIE_RESERVEE })
+  }
+  if (vente.decision === 'inconnu') {
+    console.warn(`[academie/achat] statut membre inconnu, partie suspendue offre=${offre.offreSlug} compte=${userId ? tronquer(userId) : 'aucun'}`)
+    return refusAcademie(ERREUR_MEMBRE_INCONNU, 503, headers, { message: TEXTE_MEMBRE_INCONNU, reessayer: true })
+  }
+
   // (20/11/2026) Le tarif membre d'une partie ou d'un module entier (prix-membre-pur.ts, le seul calcul ; qui y a droit :
   // membreDuTarif) : un membre du Live Club, dans la fenetre du tarif en base, paie son stripe_price_id. Sans tarif en
   // base pour l'offre, ou si la base ou ses droits sont illisibles : le prix courant (Checkout affiche le montant avant
@@ -102,7 +130,7 @@ export async function POST(req: NextRequest) {
     const maintenant = new Date()
     let calcul: Awaited<ReturnType<typeof prixDuCompte>> | null = null
     try {
-      calcul = await prixDuCompte({ userId, offre: offre.offreSlug, prixCourantEur: prixCourant, quand: maintenant })
+      calcul = await prixDuCompte({ userId, offre: offre.offreSlug, prixCourantEur: prixCourant, quand: maintenant, droits: vente.droits ?? undefined })
     } catch (err) {
       console.warn(`[academie/achat] tarif membre illisible, prix courant offre=${offre.offreSlug} : ${messageErreur(err)}`)
     }
@@ -122,10 +150,13 @@ export async function POST(req: NextRequest) {
   const origin = req.headers.get('origin')
   const base = origin && ORIGINES_RETOUR.has(origin) ? origin : SITE
   const retourUrl = `${base}${retour}?achat_session={CHECKOUT_SESSION_ID}`
+  // (27/11/2026, Black Friday) BF26 deja applique (discounts), a defaut son champ (allow_promotion_codes) : au prix
+  // courant seulement, jamais avec un tarif membre, jusqu'a CODE_PROMO_JUSQUA (code-promo-pur.ts).
+  const remise = remiseCheckout({ quand: new Date(), prixMembre: Boolean(offre.tarif), promo: promoBf26(process.env) })
 
   try {
-    const s = await creerSession(cle, offre, { retourUrl, userId, email, essai, expiresAt })
-    console.info(`[academie/achat] session creee module=${slug}${partie ? ` offre=${partie}` : ''}${offre.tarif ? ` tarif=${offre.tarif}` : ''} compte=${userId ? tronquer(userId) : 'aucun'}${essai ? ' essai' : ''}`)
+    const s = await creerSession(cle, offre, { retourUrl, userId, email, essai, expiresAt, remise })
+    console.info(`[academie/achat] session creee module=${slug}${partie ? ` offre=${partie}` : ''}${offre.tarif ? ` tarif=${offre.tarif}` : ''}${libelleRemise(s.remise)} compte=${userId ? tronquer(userId) : 'aucun'}${essai ? ' essai' : ''}`)
     return NextResponse.json({ ok: true, client_secret: s.clientSecret, session_id: s.id, cle_publique: publique }, { headers })
   } catch (err) {
     if (err instanceof ErreurStripe && (err.permission || err.statut === 401)) {

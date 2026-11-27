@@ -122,7 +122,26 @@ export type FaitsCompte = {
    * ne touche pas au Live Club. Absent = faux.
    */
   vip?: boolean
+  /**
+   * (27/11/2026, Brice : le tarif membre vaut aussi pour la formation longue)
+   * Un acces non retire a l'offre formation-complete (le 10% Club), actif ou
+   * echu, par un email d'une fiche du cockpit reliee au compte
+   * (SQL_FAITS_COCKPIT.formation_longue). preparerDroits y ajoute les lignes
+   * 'acces' de cette offre (par compte ou email verifie). N'ouvre rien : il ne
+   * sert qu'au tarif membre (membreDuTarif). Absent = faux.
+   */
+  formationLongue?: boolean
+  /**
+   * (27/11/2026, Brice : « ceux qui ont ete dans ETM ») Un statut ETM, actuel
+   * OU retire (cockpit_statut_etm, retire_le rempli ou non ;
+   * SQL_FAITS_COCKPIT.a_ete_etm). N'ouvre rien (etm, lui, ouvre tout) : il ne
+   * sert qu'au tarif membre (membreDuTarif). Absent = faux.
+   */
+  aEteEtm?: boolean
 }
+
+/** L'offre de la formation longue (le 10% Club, payee par PayPal). */
+export const OFFRE_FORMATION_LONGUE = 'formation-complete'
 
 export type Droits = {
   admin: boolean
@@ -135,6 +154,10 @@ export type Droits = {
   ouvertures: Ouverture[]
   /** Une source illisible pouvait ouvrir quelque chose : un 'ferme' peut etre faux. */
   incomplet: boolean
+  /** (27/11/2026) La formation longue achetee (FaitsCompte.formationLongue ou une ligne d'acces de l'offre) : tarif membre seulement. */
+  formationLongue: boolean
+  /** (27/11/2026) ETM actuel ou ancien (FaitsCompte.aEteEtm, ou etm) : tarif membre seulement. */
+  aEteEtm: boolean
 }
 
 export type Ouvert = 'ouvert' | 'ferme' | 'inconnu'
@@ -198,7 +221,11 @@ export function preparerDroits(f: FaitsCompte): Droits {
   // (09/11) L'equipe a le Live Club sans abonnement : 'oui', jamais « tu n'es pas membre ».
   const liveClub: EtatLiveClub = equipe ? 'oui' : f.liveClub
   const incomplet = liveClub === 'inconnu' && ouvertures.some(o => o.siLiveClub)
-  return { admin: f.admin, etm: f.etm, equipe, vip: f.vip === true, liveClub, ouvertures, incomplet }
+  // (27/11/2026) Le tarif membre : formation longue (un acces de l'offre, ou le fait du cockpit) et ETM actuel ou ancien.
+  const formationLongue = f.formationLongue === true
+    || f.lignes.some(l => l.origine === 'acces' && estSource(l.source) && l.slug === OFFRE_FORMATION_LONGUE)
+  const aEteEtm = f.etm || f.aEteEtm === true
+  return { admin: f.admin, etm: f.etm, equipe, vip: f.vip === true, liveClub, ouvertures, incomplet, formationLongue, aEteEtm }
 }
 
 type Niveau = 'module' | 'section' | 'lecon'

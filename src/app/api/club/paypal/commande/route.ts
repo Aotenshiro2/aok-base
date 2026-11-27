@@ -4,8 +4,10 @@ import { decisionCommande, offrePayPal, prixCommande, titulaireDe } from '@/lib/
 import { roleAcademie } from '@/lib/academie/droits'
 import { compteDuJeton, corsAcademie, entetesAcademie, refusAcademie, tronquer } from '@/lib/academie/http'
 import { estAdmin } from '@/lib/academie/pur'
-import { prixDuCompte } from '@/lib/academie/prix-membre'
-import { achatAVerifier, ERREUR_MEMBRE_INCONNU, TEXTE_MEMBRE_INCONNU } from '@/lib/academie/prix-membre-pur'
+import { prixDuCompte, ventePartieDuCompte } from '@/lib/academie/prix-membre'
+import {
+  achatAVerifier, ERREUR_MEMBRE_INCONNU, ERREUR_PARTIE_RESERVEE, TEXTE_MEMBRE_INCONNU, TEXTE_PARTIE_RESERVEE,
+} from '@/lib/academie/prix-membre-pur'
 import { messageErreur } from '@/lib/liveclub/pur'
 
 /**
@@ -33,6 +35,11 @@ import { messageErreur } from '@/lib/liveclub/pur'
  * le prix du tarif (prixDuCompte, prix-membre.ts), reference_id
  * module-smt-partie-2-membre. Sans compte, non membre ou hors fenetre : le
  * prix courant, comme avant.
+ *
+ * 28/11/2026 (Brice) : 'smt-partie-1' et 'smt-partie-2' ne se vendent qu'a un
+ * compte connecte membre du Live Club (ventePartie) : sinon 403
+ * 'partie_reservee_membres' { message }. Le module entier ('smt') : a tous.
+ * Aucun code promo (BF26) sur PayPal.
  *
  * Corps : { offre?, email?, renonciation: true (Club et module), essai?: true }.
  * Bearer facultatif : connecte, le compte part en custom_id (u:<uuid>, lu dans
@@ -110,6 +117,19 @@ export async function POST(req: NextRequest) {
   const titulaire = titulaireDe({ userId, email: corps.email })
   if (!titulaire) return refus('email', 400)
 
+  // (28/11/2026, Brice) Une PARTIE de Smart Money Technique ne se vend qu'a un compte connecte membre du Live Club
+  // (ventePartie) : sinon 403 'partie_reservee_membres'. Live Club illisible : 503 'membre_inconnu'. Jamais de code promo
+  // ici (BF26 ne vaut que dans les sessions Stripe Checkout).
+  const vente = await ventePartieDuCompte(userId, offre.slug)
+  if (vente.decision === 'reservee') {
+    console.info(`[club/paypal/commande] partie reservee aux membres offre=${offre.cle} compte=${userId ? tronquer(userId) : 'email'}`)
+    return refusAcademie(ERREUR_PARTIE_RESERVEE, 403, headers, { message: TEXTE_PARTIE_RESERVEE })
+  }
+  if (vente.decision === 'inconnu') {
+    console.warn(`[club/paypal/commande] statut membre inconnu, partie suspendue offre=${offre.cle}`)
+    return refusAcademie(ERREUR_MEMBRE_INCONNU, 503, headers, { message: TEXTE_MEMBRE_INCONNU, reessayer: true })
+  }
+
   // L'offre en base : son prix hors essai ; pour une offre sans prix a defaut
   // (coaching), sa presence meme, essai compris (l'achat y sera note).
   let ligne: { prix: number | null } | null | undefined
@@ -137,7 +157,7 @@ export async function POST(req: NextRequest) {
   let membre = false
   if (!essai && offre.referenceMembre && userId) {
     try {
-      const calcul = await prixDuCompte({ userId, offre: offre.slug, prixCourantEur: montantEur })
+      const calcul = await prixDuCompte({ userId, offre: offre.slug, prixCourantEur: montantEur, droits: vente.droits ?? undefined })
       // (27/11/2026, correctif des bonus membres) Tarif possible, statut du compte inconnu : pas de commande au prix
       // plein. 503 'membre_inconnu' (les boutons PayPal relancent sur une erreur, puis la page dit de reessayer).
       if (achatAVerifier(calcul)) {

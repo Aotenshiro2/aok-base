@@ -92,6 +92,8 @@ type LigneIdentite = { role: string | null; emails: string[] | null }
 type LigneCockpit = {
   etm: boolean; vip: boolean; broker_jusquau: string | null; manuel_jusquau: string | null; exempte: boolean
   abonnement_cockpit: boolean
+  /** (27/11/2026) Tarif membre seulement : ETM actuel ou ancien, formation longue achetee. */
+  a_ete_etm?: boolean; formation_longue?: boolean
   secours_essai: boolean; autres_adresses: number | null
 }
 type LigneAccesSql = {
@@ -129,6 +131,9 @@ export async function droitsAcademie(userId: string): Promise<DroitsAcademie> {
     etm: c?.etm === true,
     // (10/11/2026) Rang Skool vip : statut affiche par Mon espace, n'ouvre rien (preparerDroits).
     vip: c?.vip === true,
+    // (27/11/2026) Le tarif membre (membreDuTarif) : n'ouvrent rien de plus.
+    aEteEtm: c?.a_ete_etm === true,
+    formationLongue: c?.formation_longue === true,
     secoursEssai: c?.secours_essai === true,
     lignes,
   }

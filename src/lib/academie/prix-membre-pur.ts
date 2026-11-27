@@ -6,6 +6,11 @@
 // heure de Paris), un membre du Live Club paie la partie 2 de Smart Money
 // Technique 250 EUR au lieu de 850. Tous les autres paient le prix courant.
 //
+// Qui est membre (27/11/2026, Brice) : le Live Club actif, mais aussi un
+// compte qui a achete la formation longue (formation-complete, le 10% Club)
+// ou qui est ou a ete ETM (membreDuTarif, membreHorsLiveClub). Scripts :
+// verifier-prix-membre-profils.mjs, verifier-modules-membres-bf.mjs.
+//
 // C'est le SEUL endroit qui calcule le prix d'un membre (prixMembre) : la
 // carte (/api/academie/achat), le PayPal (commande et capture) et /moi
 // (l'affichage) passent tous par lui. Decision de Brice du 20/11, PAS
@@ -16,7 +21,7 @@
 // Un tarif membre est une offre en base (SQL_TARIFS_MEMBRES) : son prix, son
 // stripe_price_id et sa fenetre de vente. Rien n'est ecrit en dur ici.
 
-import type { Droits } from './pur'
+import type { Droits, EtatLiveClub } from './pur'
 
 export type TarifMembre = {
   /** L'offre vendue (academie_offres.slug), celle que l'achat ouvre : module-la-formation-complete-partie-2. */
@@ -70,17 +75,40 @@ export function membreDuModule(d: Pick<Droits, 'liveClub' | 'ouvertures'>, modul
 /** Une offre vendue qui est une PARTIE d'un module (« module-<module>-partie-<n> »), comme achat-pur.ts (offrePartie). */
 const OFFRE_DE_PARTIE = /^module-[a-z0-9]+(?:-[a-z0-9]+)*-partie-[1-9][0-9]?$/
 
+/** L'offre est-elle une partie de module (module-<module>-partie-<n>) ? */
+export const estOffreDePartie = (offre: string): boolean => OFFRE_DE_PARTIE.test(offre)
+
+/**
+ * (27/11/2026, Brice : « -50 c'est membre liveclub » puis « ça vaut aussi pour
+ * ceux qui auraient déjà pris la formation longue ou ceux qui ont été dans
+ * ETM ») Les profils qui ont le tarif membre sans passer par le Live Club :
+ * la formation longue achetee (offre formation-complete, le 10% Club, active
+ * ou echue, jamais retiree) ou un statut ETM, actuel ou ancien. Lus en base
+ * (SQL_ACCES et SQL_FAITS_COCKPIT), jamais par Stripe : jamais 'inconnu'.
+ * Champs absents (droits construits a la main) : faux.
+ */
+export const membreHorsLiveClub = (d: Partial<Pick<Droits, 'etm' | 'formationLongue' | 'aEteEtm'>>): boolean =>
+  d.formationLongue === true || d.aEteEtm === true || d.etm === true
+
 /**
  * (20/11/2026, modules au Black Friday) Qui a droit au tarif membre d'une
  * offre, une regle par tarif selon l'offre vendue :
  * - une PARTIE d'un module (la partie 2 de Smart Money Technique) : la regle
- *   de la partie 2, inchangee (membreDuModule : le Live Club ouvre une partie
- *   de ce module, et il est actif) ;
+ *   de la partie 2 (membreDuModule : le Live Club ouvre une partie de ce
+ *   module, et il est actif), OU (27/11) formation longue ou ETM ;
  * - un module ENTIER (les 7 modules vendus a l'unite) : le Live Club actif
- *   seulement (droits.liveClub 'oui' ; l'equipe l'a toujours).
- * 'inconnu' (Stripe illisible), 'non' ou 'non_lu' : pas membre, prix courant.
+ *   (droits.liveClub 'oui' ; l'equipe l'a toujours), OU (27/11) formation
+ *   longue ou ETM (membreHorsLiveClub).
+ * 'inconnu' (Stripe illisible), 'non' ou 'non_lu' sans formation ni ETM : pas
+ * membre, prix courant. Un achat de la partie 1 seule (ou d'un module) ne
+ * fait toujours pas un membre.
  */
-export function membreDuTarif(d: Pick<Droits, 'liveClub' | 'ouvertures'>, offre: string, moduleId: string | null): boolean {
+export function membreDuTarif(
+  d: Pick<Droits, 'liveClub' | 'ouvertures'> & Partial<Pick<Droits, 'etm' | 'formationLongue' | 'aEteEtm'>>,
+  offre: string,
+  moduleId: string | null,
+): boolean {
+  if (membreHorsLiveClub(d)) return true
   if (OFFRE_DE_PARTIE.test(offre)) return membreDuModule(d, moduleId)
   return d.liveClub === 'oui'
 }
@@ -152,6 +180,28 @@ export const vueTarif = (c: PrixCalcule) =>
 export function achatAVerifier(calcul: { tarif: TarifMembre | null; incertain: boolean }): boolean {
   return !calcul.tarif && calcul.incertain
 }
+
+/**
+ * (28/11/2026, Brice : « quand on vend SMT de l'extérieur, on le vend full. On
+ * ne le vend pas en deux parties. [...] Partie 1, partie 2, ça c'est que pour
+ * les membres du Live Club. ») Une offre de PARTIE d'un module (OFFRE_DE_PARTIE :
+ * module-la-formation-complete-partie-1 et -partie-2) ne se vend qu'a un compte
+ * connecte dont le Live Club est actif (droits.liveClub 'oui' ; l'equipe l'a
+ * toujours). Sans compte, 'non' ou 'non_lu' : 'reservee' (403
+ * partie_reservee_membres). 'inconnu' (Stripe illisible) : 'inconnu' (503
+ * membre_inconnu, reessayer). Le module entier et les autres offres : 'ok'.
+ * La formation longue ou l'ETM seuls n'ouvrent PAS la vente d'une partie.
+ */
+export function ventePartie(p: { offre: string; connecte: boolean; liveClub: EtatLiveClub | null }): 'ok' | 'reservee' | 'inconnu' {
+  if (!OFFRE_DE_PARTIE.test(p.offre)) return 'ok'
+  if (!p.connecte) return 'reservee'
+  if (p.liveClub === 'oui') return 'ok'
+  return p.liveClub === 'inconnu' ? 'inconnu' : 'reservee'
+}
+
+export const ERREUR_PARTIE_RESERVEE = 'partie_reservee_membres'
+export const TEXTE_PARTIE_RESERVEE =
+  "Cette partie est réservée aux membres du Live Club : connecte-toi avec l'email de ton abonnement. Sinon, le module se prend en entier."
 
 export const ERREUR_MEMBRE_INCONNU = 'membre_inconnu'
 export const TEXTE_MEMBRE_INCONNU = "On n'a pas pu vérifier ton statut de membre. Réessaie dans un instant."

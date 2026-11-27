@@ -264,11 +264,12 @@ bloc('affichage (/moi) : le tarif seulement pour un membre, pendant la fenetre',
 
 bloc('code : les routes passent par prixDuCompte, le tarif n ouvre rien et ne se lit qu en base', () => {
   const carte = lire('../src/app/api/academie/achat/route.ts')
-  assert.match(carte, /prixDuCompte\(\{ userId, offre: offre\.offreSlug, prixCourantEur: prixCourant, quand: maintenant \}\)/)
+  // (28/11/2026) Les droits deja lus pour la partie (ventePartieDuCompte) sont passes a prixDuCompte.
+  assert.match(carte, /prixDuCompte\(\{ userId, offre: offre\.offreSlug, prixCourantEur: prixCourant, quand: maintenant, droits: vente\.droits \?\? undefined \}\)/)
   assert.match(carte, /stripePriceId: calcul\.tarif\.stripePriceId, tarif: calcul\.tarif\.slug/)
   assert.doesNotMatch(carte, /corps\.prix|corps\.montant/, 'jamais un prix venu de la page')
   const commande = lire('../src/app/api/club/paypal/commande/route.ts')
-  assert.match(commande, /prixDuCompte\(\{ userId, offre: offre\.slug, prixCourantEur: montantEur \}\)/)
+  assert.match(commande, /prixDuCompte\(\{ userId, offre: offre\.slug, prixCourantEur: montantEur, droits: vente\.droits \?\? undefined \}\)/)
   assert.doesNotMatch(commande, /corps\.prix|corps\.montant/)
   const capture = lire('../src/app/api/club/paypal/capturer/route.ts')
   assert.match(capture, /quand: lu\.commande\.creeLe/)
