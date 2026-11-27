@@ -100,7 +100,7 @@ import { CONSIGNE_NOTER_BESOIN, OUTIL_NOTER_BESOIN } from '../besoins/pur'
 // (06/11, apres-midi) Les limites des agents : noter_limite (module pur, commun au chat support ; tri par le serveur).
 import { CONSIGNE_NOTER_LIMITE, OUTIL_NOTER_LIMITE } from '../besoins/signaux-pur'
 // (27/11) Ne plus recevoir nos messages : la consigne et l'outil (module pur).
-import { CONSIGNE_NE_PLUS_CONTACTER, NOM_OUTIL_NE_PLUS_CONTACTER } from './ne-plus-contacter-pur'
+import { CONSIGNE_NE_PLUS_CONTACTER, NOM_OUTIL_NE_PLUS_CONTACTER, NOM_OUTIL_REPRENDRE_MESSAGES } from './ne-plus-contacter-pur'
 
 /**
  * (27/11, Brice) NE PLUS CONTACTER : la personne ECRIT qu'elle ne veut plus de
@@ -111,6 +111,18 @@ import { CONSIGNE_NE_PLUS_CONTACTER, NOM_OUTIL_NE_PLUS_CONTACTER } from './ne-pl
 export const OUTIL_NE_PLUS_CONTACTER: Anthropic.Tool = {
   name: NOM_OUTIL_NE_PLUS_CONTACTER,
   description: "Le membre écrit lui-même qu'il ne veut plus être contacté ou ne plus recevoir nos messages (promos, relances), ou écrit « me désabonner », « me désinscrire » ou « stop » sans préciser. Sans paramètre. Appelle-le sans écrire de texte : le serveur relit son message, lui demande s'il parle de son abonnement quand ce n'est pas clair, et lui répond. Ne change rien à son accès. Jamais de toi-même.",
+  input_schema: { type: 'object', properties: {}, additionalProperties: false },
+}
+
+/**
+ * (27/11, Brice : « si la personne redemande des messages, il faut lui
+ * renvoyer ») La LEVEE : la personne ECRIT qu'elle veut de nouveau nos
+ * messages. Sans parametre : le serveur relit son message et son etat, leve le
+ * marqueur (ou pose la question si ce n'est pas net) et repond lui-meme.
+ */
+export const OUTIL_REPRENDRE_MESSAGES: Anthropic.Tool = {
+  name: NOM_OUTIL_REPRENDRE_MESSAGES,
+  description: "Le membre écrit lui-même qu'il veut de nouveau recevoir nos messages (promos, infos, relances), après avoir demandé à ne plus en recevoir, ou répond oui quand le serveur le lui a demandé. Sans paramètre. Appelle-le sans écrire de texte : le serveur relit son message et lui répond. Jamais de toi-même.",
   input_schema: { type: 'object', properties: {}, additionalProperties: false },
 }
 
@@ -262,6 +274,7 @@ export const OUTILS_MEMBRE: Anthropic.Tool[] = [
   OUTIL_NOTER_LIMITE,
   // (27/11) Ne plus recevoir nos messages (ne-plus-contacter-pur.ts) : le serveur decide, pose et repond.
   OUTIL_NE_PLUS_CONTACTER,
+  OUTIL_REPRENDRE_MESSAGES,
   {
     name: 'demander_un_humain',
     description: "Transmet à l'équipe du Live Club : le membre demande à parler à quelqu'un, un remboursement ou une remise, fait une réclamation, a un cas particulier, ou tu ne sais pas répondre à une question sur son compte ou le Live Club. Jamais pour une confidence ou une humeur. L'équipe répondra dans cette conversation Telegram. Sans paramètre.",

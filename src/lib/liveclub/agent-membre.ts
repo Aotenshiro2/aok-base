@@ -76,8 +76,10 @@ import { appliquerLimitesTelegram } from '@/lib/besoins/signaux'
 import {
   NOM_OUTIL_NE_PLUS_CONTACTER, QUESTION_DOUTE_NE_PLUS_CONTACTER, RESULTAT_OUTIL_LES_DEUX, TEXTE_NE_PLUS_CONTACTER_NOTE,
   TEXTE_NE_PLUS_CONTACTER_PANNE, decisionNePlusContacter, dernierMessageDuBot, resultatOutilSansMarqueur,
+  NOM_OUTIL_REPRENDRE_MESSAGES, QUESTION_REPRISE_MESSAGES, RESULTAT_REPRISE_PAS_MARQUE, RESULTAT_REPRISE_RIEN,
+  TEXTE_REPRISE_MESSAGES_NOTE, decisionReprendreMessages,
 } from './ne-plus-contacter-pur'
-import { poserNePlusContacter } from './ne-plus-contacter'
+import { leverNePlusContacter, nePlusContacterPose, poserNePlusContacter } from './ne-plus-contacter'
 
 export { MODELE_LIVECLUB }
 
@@ -314,7 +316,7 @@ async function boucleAgentMembre(
         continue
       }
       // (27/11) Ni le marqueur « ne plus contacter » : rien n'est pose sur un message suspect.
-      if (prudence && bloc.name === NOM_OUTIL_NE_PLUS_CONTACTER) {
+      if (prudence && (bloc.name === NOM_OUTIL_NE_PLUS_CONTACTER || bloc.name === NOM_OUTIL_REPRENDRE_MESSAGES)) {
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(REFUS_PRUDENCE_MEMBRE) })
         continue
       }
@@ -365,6 +367,26 @@ async function boucleAgentMembre(
           continue
         }
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(resultatOutilSansMarqueur(d)) })
+        continue
+      }
+
+      // (27/11, Brice) LA LEVEE : il ecrit vouloir de nouveau nos messages. Le
+      // serveur relit le message (decision pure) et l'etat courant : marque et
+      // net = une ligne de levee et la confirmation ; marque et pas net = la
+      // question ; pas marque ou pas une demande = rien, l'agent repond normalement.
+      if (bloc.name === NOM_OUTIL_REPRENDRE_MESSAGES) {
+        const d = decisionReprendreMessages(question, { dernierBot: dernierMessageDuBot(historique), appelModele: true })
+        if (d.type === 'rien') {
+          resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(RESULTAT_REPRISE_RIEN) })
+          continue
+        }
+        const marque = await nePlusContacterPose(telegramId)
+        if (marque === null) return { texte: TEXTE_NE_PLUS_CONTACTER_PANNE, repli: true, ...drapeau() }
+        if (marque && d.type === 'doute') return { texte: QUESTION_REPRISE_MESSAGES, ...drapeau() }
+        const l = marque ? await leverNePlusContacter(telegramId, 'agent') : 'pas_marque'
+        if (l === 'panne') return { texte: TEXTE_NE_PLUS_CONTACTER_PANNE, repli: true, ...drapeau() }
+        if (l === 'leve') return { texte: TEXTE_REPRISE_MESSAGES_NOTE, ...drapeau() }
+        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(RESULTAT_REPRISE_PAS_MARQUE) })
         continue
       }
 

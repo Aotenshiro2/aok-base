@@ -30,6 +30,109 @@
 /** La regle du journal du bot (geste 'rappel', resultat 'fait'). La MEME constante que bf-anciens-pur.ts. */
 export const REGLE_NE_PLUS_CONTACTER = 'ne_plus_contacter'
 
+/**
+ * (27/11, Brice : « Bien sur que si la personne redemande des messages, il faut
+ * lui renvoyer. ») La LEVEE : une ligne de plus, jamais une suppression. Meme
+ * geste 'rappel', resultat 'fait', regle REGLE_NE_PLUS_CONTACTER_LEVE. L'etat
+ * courant = la DERNIERE des deux regles pour la personne (fait_le, puis
+ * geste_id) : etatCourantNePlusContacter ici, sqlNePlusContacter cote serveur.
+ */
+export const REGLE_NE_PLUS_CONTACTER_LEVE = 'ne_plus_contacter_leve'
+
+/** Une ligne du journal, telle que la lit etatCourantNePlusContacter. */
+export type LigneJournalNePlus = {
+  telegram_id: number; geste: string; resultat: string; regle: string | null; fait_le: string | Date; geste_id: number
+}
+
+/**
+ * L'etat courant d'une personne d'apres ses lignes du journal : vrai = marquee.
+ * Le meme calcul que la requete du serveur (sqlNePlusContacter), rejoue par les tests.
+ */
+export function etatCourantNePlusContacter(lignes: readonly LigneJournalNePlus[], telegramId: number): boolean {
+  const utiles = lignes.filter(g => g.telegram_id === telegramId && g.geste === 'rappel' && g.resultat === 'fait'
+    && (g.regle === REGLE_NE_PLUS_CONTACTER || g.regle === REGLE_NE_PLUS_CONTACTER_LEVE))
+  if (!utiles.length) return false
+  const temps = (g: LigneJournalNePlus) => new Date(g.fait_le).getTime()
+  const dernier = utiles.reduce((a, b) => (temps(b) > temps(a) || (temps(b) === temps(a) && b.geste_id > a.geste_id) ? b : a))
+  return dernier.regle === REGLE_NE_PLUS_CONTACTER
+}
+
+/** L'outil de l'agent pour la levee (prompt-membre.ts). */
+export const NOM_OUTIL_REPRENDRE_MESSAGES = 'reprendre_nos_messages'
+
+/** La confirmation de la levee, une phrase d'etat. */
+export const TEXTE_REPRISE_MESSAGES_NOTE = "C'est noté : tu recevras de nouveau nos messages."
+
+/** La question quand la demande de levee n'est pas nette, une seule fois. */
+export const QUESTION_REPRISE_MESSAGES = 'Tu veux que je t\'envoie de nouveau nos messages ?'
+
+export type DecisionReprise =
+  | { type: 'lever' }
+  | { type: 'doute' }
+  | { type: 'rien' }
+
+// Les mots de nos envois.
+const NOS_ENVOIS = String.raw`(?:messages?|promos?|infos?|informations?|offres?|relances?|nouvelles|news|actus?|annonces?|bons plans?)`
+const DE_NOUVEAU = String.raw`(?:de nouveau |a nouveau |encore |re-?)?`
+const NET_REPRISE = [
+  // « tu peux me renvoyer vos promos », « vous pouvez de nouveau m'envoyer les infos »
+  new RegExp(String.raw`\b(?:tu peux|vous pouvez|tu peux de nouveau|vous pouvez de nouveau|tu peux a nouveau|vous pouvez a nouveau) (?:de nouveau |a nouveau )?(?:me |m')(?:r|re-?)?envoyer (?:de nouveau |a nouveau )?(?:vos |tes |les |des |nos )?${NOS_ENVOIS}`),
+  // « je veux de nouveau recevoir les infos », « je veux bien recevoir vos promos »
+  new RegExp(String.raw`\bje (?:veux|voudrais|souhaite|souhaiterais|veux bien|aimerais) ${DE_NOUVEAU}recevoir ${DE_NOUVEAU}(?:vos |tes |les |des |nos )?${NOS_ENVOIS}`),
+  // « renvoie-moi vos messages », « renvoyez-moi les promos »
+  new RegExp(String.raw`\b(?:renvoie|renvoies|renvoyez|reenvoie|reenvoyez)[- ]moi (?:vos |tes |les |des )?${NOS_ENVOIS}`),
+  // « tu peux me recontacter », « recontactez-moi », « je veux etre recontacte »
+  /\b(?:tu peux|vous pouvez) (?:de nouveau |a nouveau )?(?:me recontacter|me contacter de nouveau|me contacter a nouveau)\b/,
+  /\b(?:recontacte|recontactez)[- ]moi\b/,
+  /\bje (?:veux|souhaite|veux bien) (?:de nouveau )?etre (?:re)?contacte/,
+]
+// Un retour possible, pas net : la question.
+const AMBIGU_REPRISE = new RegExp(String.raw`(\b(?:change|changer) d'avis\b|\bfinalement\b|\bremets?[- ]moi\b|\bde nouveau\b|\ba nouveau\b|\bre-?abonne\w* aux\b).*\b${NOS_ENVOIS}\b|\b${NOS_ENVOIS}\b.*(\b(?:change|changer) d'avis\b|\bfinalement\b|\bde nouveau\b|\ba nouveau\b)`)
+// Une negation ou un arret : jamais une levee.
+const NEGATION = /\b(ne|n'|pas|jamais|plus aucun|arrete\w*|stop)\b|\bn'/
+
+/** Resultats de l'outil de levee quand rien n'est ecrit (le modele repond lui-meme). */
+export const RESULTAT_REPRISE_RIEN = { refus: "Pas une demande nette de recevoir de nouveau nos messages : rien n'est changé. Réponds-lui normalement, sans parler de cette possibilité." }
+export const RESULTAT_REPRISE_PAS_MARQUE = { rien_a_changer: "Il n'a pas demandé à ne plus recevoir nos messages : rien à changer. Réponds-lui normalement." }
+
+/** Oui ou non a une question fermee. */
+export function ouiOuNon(texte: string): 'oui' | 'non' | 'flou' {
+  const t = normaliser(texte).replace(/[.!?]+$/, '').trim()
+  if (/^(non|nan|non merci|pas besoin|surtout pas|pas du tout|non pas pour l'instant|non c'est bon)\b/.test(t)) return 'non'
+  if (/^(oui|ouais|yes|ok|okay|d'accord|dac|volontiers|vas-?y|carrement|avec plaisir|bien sur|evidemment|je veux bien|oui stp|oui svp|oui merci|parfait)\b/.test(t)) return 'oui'
+  return 'flou'
+}
+
+/** Le dernier message du bot est-il la question de la levee ? */
+export function estQuestionReprise(dernierBot: string | null | undefined): boolean {
+  return typeof dernierBot === 'string' && normaliser(dernierBot).includes(normaliser(QUESTION_REPRISE_MESSAGES))
+}
+
+/**
+ * Une demande ECRITE de recevoir de nouveau nos messages ? Ne regarde pas le
+ * marqueur : l'appelant ne leve que si la personne est marquee (sinon rien a
+ * changer, la reponse habituelle).
+ */
+export function decisionReprendreMessages(
+  texte: unknown,
+  o: { dernierBot?: string | null; appelModele?: boolean } = {},
+): DecisionReprise {
+  if (typeof texte !== 'string' || !texte.trim() || texte.length > 1500) return { type: 'rien' }
+  const t = normaliser(texte)
+  if (estQuestionReprise(o.dernierBot)) {
+    const r = ouiOuNon(texte)
+    if (r === 'oui') return { type: 'lever' }
+    if (r === 'non') return { type: 'rien' }
+    // Floue : pas de seconde question ; une demande nette reste comprise.
+    return !NEGATION.test(t) && NET_REPRISE.some(x => x.test(t)) ? { type: 'lever' } : { type: 'rien' }
+  }
+  // « ne me contactez plus » n'est jamais une levee.
+  if (demandeNette(texte) || NEGATION.test(t)) return o.appelModele && !demandeNette(texte) ? { type: 'doute' } : { type: 'rien' }
+  if (NET_REPRISE.some(x => x.test(t))) return { type: 'lever' }
+  if (AMBIGU_REPRISE.test(t)) return { type: 'doute' }
+  return o.appelModele ? { type: 'doute' } : { type: 'rien' }
+}
+
 /** L'outil de l'agent membre (prompt-membre.ts). */
 export const NOM_OUTIL_NE_PLUS_CONTACTER = 'ne_plus_contacter'
 
@@ -191,4 +294,4 @@ export const RESULTAT_OUTIL_LES_DEUX = {
  * La consigne de l'agent (SYSTEM_PROMPT_MEMBRE). Jamais de proposition : il
  * ne reconnait que ce que la personne ecrit.
  */
-export const CONSIGNE_NE_PLUS_CONTACTER = `- Ne plus recevoir nos messages : quand le membre écrit lui-même qu'il ne veut plus être contacté ou ne plus recevoir nos messages (« ne m'écrivez plus », « je ne veux plus de vos promos », « arrête de me relancer »), appelle ${NOM_OUTIL_NE_PLUS_CONTACTER} sans écrire de texte : le serveur lui répond. « Me désabonner », « me désinscrire » ou « stop » sans plus de précision : appelle aussi ${NOM_OUTIL_NE_PLUS_CONTACTER}, le serveur lui demande s'il parle de son abonnement ou de nos messages. S'il répond « mon abonnement », c'est une demande d'arrêt (proposer_arret). Une durée (« pas avant lundi », « je suis en vacances ») ou un autre service que nous : ce n'est pas cette demande, réponds normalement. Ne plus recevoir nos messages ne change rien à son accès : il garde le groupe, ses outils, et tu lui réponds toujours. Tu ne proposes jamais cette possibilité, tu n'en parles pas s'il ne le demande pas, et aucun bouton ne l'offre.`
+export const CONSIGNE_NE_PLUS_CONTACTER = `- Ne plus recevoir nos messages : quand le membre écrit lui-même qu'il ne veut plus être contacté ou ne plus recevoir nos messages (« ne m'écrivez plus », « je ne veux plus de vos promos », « arrête de me relancer »), appelle ${NOM_OUTIL_NE_PLUS_CONTACTER} sans écrire de texte : le serveur lui répond. « Me désabonner », « me désinscrire » ou « stop » sans plus de précision : appelle aussi ${NOM_OUTIL_NE_PLUS_CONTACTER}, le serveur lui demande s'il parle de son abonnement ou de nos messages. S'il répond « mon abonnement », c'est une demande d'arrêt (proposer_arret). Une durée (« pas avant lundi », « je suis en vacances ») ou un autre service que nous : ce n'est pas cette demande, réponds normalement. Ne plus recevoir nos messages ne change rien à son accès : il garde le groupe, ses outils, et tu lui réponds toujours. S'il écrit qu'il veut de nouveau recevoir nos messages (« tu peux me renvoyer vos promos », « je veux de nouveau recevoir les infos »), ou s'il répond oui quand le serveur le lui a demandé, appelle ${NOM_OUTIL_REPRENDRE_MESSAGES} sans écrire de texte : le serveur lui répond. Tu ne proposes jamais l'une ou l'autre possibilité, tu n'en parles pas s'il ne le demande pas, et aucun bouton ne les offre.`

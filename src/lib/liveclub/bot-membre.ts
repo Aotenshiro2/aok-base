@@ -151,8 +151,9 @@ import { repondreAuMembre } from './agent-membre'
 import {
   QUESTION_DOUTE_NE_PLUS_CONTACTER, TEXTE_NE_PLUS_CONTACTER_NOTE, TEXTE_NE_PLUS_CONTACTER_PANNE,
   decisionNePlusContacter, dernierMessageDuBot,
+  QUESTION_REPRISE_MESSAGES, TEXTE_REPRISE_MESSAGES_NOTE, decisionReprendreMessages,
 } from './ne-plus-contacter-pur'
-import { poserNePlusContacter } from './ne-plus-contacter'
+import { leverNePlusContacter, nePlusContacterPose, poserNePlusContacter } from './ne-plus-contacter'
 import { contexteAccesOffert } from './prompt-membre'
 import {
   annulerDemandeEquipe, direAttenteUneFois, enregistrerEchangeSupport, estEnAttenteHumain, lireEtatFil, lireMessagesFil,
@@ -1382,6 +1383,22 @@ async function traiterNonRattache(
     const p = await poserNePlusContacter(u.id, 'non_rattache')
     await repondre(p === 'panne' ? TEXTE_NE_PLUS_CONTACTER_PANNE : TEXTE_NE_PLUS_CONTACTER_NOTE, p === 'panne' ? clavierEquipe() : undefined)
     if (nePlus.type === 'poser') return
+  }
+  // (27/11, Brice) LA LEVEE, sans agent : une demande nette (ou « oui » a la
+  // question) leve le marqueur ; une demande pas nette donne la question. Le
+  // marqueur n'est lu que si le texte ressemble a une telle demande : personne
+  // de non marque n'en entend parler, le parcours habituel continue.
+  const reprise = nePlus.type === 'rien' ? decisionReprendreMessages(texte, { dernierBot: dernierMessageDuBot(etat?.messages) }) : null
+  if (reprise && reprise.type !== 'rien' && await nePlusContacterPose(u.id) === true) {
+    if (reprise.type === 'doute') {
+      await repondre(QUESTION_REPRISE_MESSAGES)
+      return
+    }
+    const l = await leverNePlusContacter(u.id, 'non_rattache')
+    if (l !== 'pas_marque') {
+      await repondre(l === 'panne' ? TEXTE_NE_PLUS_CONTACTER_PANNE : TEXTE_REPRISE_MESSAGES_NOTE, l === 'panne' ? clavierEquipe() : undefined)
+      return
+    }
   }
   // (15/10) Un choix de compte encore ouvert (« Utiliser ce compte-ci » ou
   // « Ce n'est pas moi ») : il lui est redonne, plutot que la demande d'email.

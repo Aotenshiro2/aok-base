@@ -17,7 +17,15 @@
 - Lu par : les conseils d'accueil du passage (tipDuMembre, compteur tips.ne_plus_contacter) et le lanceur bf-anciens.
   Pas lu par les messages lies a l'abonnement (prelevement J-3, pause, sortie, broker, exemption), ni les reponses du
   bot, l'entree dans le groupe, l'indicateur ou une reprise.
-- Prompt de l'agent change (consigne + outil) : rejouer scripts/eval-fuites.mjs avant la mise en ligne.
+- LEVEE (Brice, 27/11 : « si la personne redemande des messages, il faut lui renvoyer ») : une ligne de plus, jamais
+  une suppression, geste 'rappel', resultat 'fait', regle 'ne_plus_contacter_leve'. ETAT COURANT = la derniere des deux
+  regles (fait_le desc, geste_id desc) : sqlNePlusContacter (serveur), etatCourantNePlusContacter (pur). Pose et levee
+  sous verrou par personne, seulement si l'etat courant est l'inverse (re-pose apres levee : ok). Outil
+  reprendre_nos_messages (agent) ; non rattache : meme decision pure (decisionReprendreMessages), marqueur lu seulement
+  devant une telle demande. Pas net : « Tu veux que je t'envoie de nouveau nos messages ? », oui = levee.
+- A CHANGER dans bf-anciens (non poussee) : lireEtatAncien lit « exists » de la pose ; le remplacer par
+  ${sqlNePlusContacter(telegramId)} as ne_plus (sinon une personne levee reste exclue).
+- Prompt de l'agent change (consigne + 2 outils) : rejouer scripts/eval-fuites.mjs avant la mise en ligne.
 
 ## BONUS MEMBRES DU LIVE CLUB : LE CORRECTIF (27/11/2026, Brice « Vas-y fait tout le correctif » ; branche bonus-membres depuis origin/master 2b0c834, commitee NON poussee ; aucune migration)
 

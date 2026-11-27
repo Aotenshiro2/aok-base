@@ -111,18 +111,29 @@ bloc('la reponse a la question de doute (une seule question)', () => {
 })
 
 bloc('personne marquee qui ecrit ensuite : le bot repond normalement', () => {
-  // Une question ordinaire ne touche jamais au marqueur.
-  for (const t of ['Quand est le prochain live ?', 'je veux reprendre mon abonnement', "je veux l'indicateur d'Alex", 'Je veux revenir dans le groupe'])
+  // Une question ordinaire ne touche jamais au marqueur, ni dans un sens ni dans l'autre.
+  for (const t of ['Quand est le prochain live ?', 'je veux reprendre mon abonnement', "je veux l'indicateur d'Alex", 'Je veux revenir dans le groupe']) {
     assert.equal(type(t), 'rien', t)
-  // Aucun chemin de reponse, d'entree, de reprise ni d'indicateur ne LIT le marqueur :
-  // seul le passage (conseils d'accueil) appelle nePlusContacterPose.
+    assert.equal(N.decisionReprendreMessages(t).type, 'rien', t)
+  }
+  // Aucun chemin de reponse, d'entree, de reprise ni d'indicateur ne LIT le marqueur pour
+  // refuser quelque chose : le passage (conseils d'accueil) le lit, et le bot ne le lit
+  // que devant une demande de levee (outil reprendre_nos_messages, et le meme geste pour
+  // un compte non rattache).
   const dossier = new URL('../src/lib/liveclub/', import.meta.url)
   const lecteurs = readdirSync(dossier).filter(f => f.endsWith('.ts') && f !== 'ne-plus-contacter.ts')
-    .filter(f => /nePlusContacterPose/.test(readFileSync(new URL(f, dossier), 'utf8')))
-  assert.deepEqual(lecteurs, ['passage.ts'])
-  // Ni la regle brute en SQL ailleurs que dans les modules du marqueur.
+    .filter(f => /nePlusContacterPose\(/.test(readFileSync(new URL(f, dossier), 'utf8'))).sort()
+  assert.deepEqual(lecteurs, ['agent-membre.ts', 'bot-membre.ts', 'passage.ts'])
+  const agent = lire('src/lib/liveclub/agent-membre.ts')
+  assert.equal(agent.split('nePlusContacterPose(').length - 1, 1)
+  const reprise = agent.slice(agent.indexOf('if (bloc.name === NOM_OUTIL_REPRENDRE_MESSAGES) {'))
+  assert.ok(reprise.indexOf('nePlusContacterPose(') > 0 && reprise.indexOf('nePlusContacterPose(') < reprise.indexOf('\n      }\n'), 'agent : lu dans la levee seulement')
+  const bot = lire('src/lib/liveclub/bot-membre.ts')
+  assert.equal(bot.split('nePlusContacterPose(').length - 1, 1)
+  assert.match(bot, /if \(reprise && reprise\.type !== 'rien' && await nePlusContacterPose\(u\.id\) === true\) \{/, 'bot : lu seulement devant une demande de levee')
+  // Ni les regles brutes en SQL ailleurs que dans les modules du marqueur.
   const sql = readdirSync(dossier).filter(f => f.endsWith('.ts') && !f.startsWith('ne-plus-contacter'))
-    .filter(f => /regle = 'ne_plus_contacter'|REGLE_NE_PLUS_CONTACTER/.test(readFileSync(new URL(f, dossier), 'utf8')))
+    .filter(f => /'ne_plus_contacter|REGLE_NE_PLUS_CONTACTER/.test(readFileSync(new URL(f, dossier), 'utf8')))
   assert.deepEqual(sql, [])
 })
 
@@ -131,43 +142,124 @@ bloc('reprise d abonnement : normale', () => {
   for (const f of ['droits.ts', 'accueil-groupe.ts', 'stripe.ts', 'passage-regles.ts', 'actions-membre.ts', 'avant-entree.ts', 'indicateur.ts']) {
     assert.ok(!/ne_plus_contacter|NePlusContacter|nePlusContacter/i.test(lire(`src/lib/liveclub/${f}`)), f)
   }
-  const bot = lire('src/lib/liveclub/bot-membre.ts')
-  // Dans bot-membre, le marqueur n'est que POSE (compte non rattache), jamais lu pour refuser quelque chose.
-  assert.ok(!/nePlusContacterPose/.test(bot))
-  // Une reprise ecrite a l'agent part vers l'agent, pas vers le marqueur.
+  // Une reprise d'abonnement ecrite part vers son parcours, pas vers le marqueur.
   assert.equal(type('je veux me réabonner'), 'rien')
+  assert.equal(N.decisionReprendreMessages('je veux me réabonner').type, 'rien')
   assert.equal(type('je veux reprendre le Live Club, je me suis désabonné le mois dernier'), 'abonnement')
 })
 
-bloc('le lanceur des anciens lit le marqueur pose par le bot', () => {
-  assert.equal(N.REGLE_NE_PLUS_CONTACTER, 'ne_plus_contacter')
+bloc('levee : demande nette, pas nette, question, jamais sur un arret', () => {
+  const lev = (t, o) => N.decisionReprendreMessages(t, o).type
+  for (const t of [
+    'Tu peux me renvoyer vos promos',
+    'vous pouvez de nouveau m\'envoyer les infos',
+    'Je veux de nouveau recevoir les infos',
+    'je veux bien recevoir vos messages',
+    'Renvoie-moi tes messages stp',
+    'tu peux me recontacter',
+    'Recontactez-moi',
+    'je souhaite être recontacté',
+  ]) assert.equal(lev(t), 'lever', t)
+  // Pas net : la question (sans agent seulement quand nos envois sont cites).
+  assert.equal(lev("j'ai changé d'avis pour les messages"), 'doute')
+  assert.equal(lev('finalement les promos ça m\'intéresse'), 'doute')
+  assert.equal(lev("c'est bon maintenant", { appelModele: true }), 'doute')
+  assert.equal(lev("c'est bon maintenant"), 'rien')
+  // Une negation, un arret : jamais une levee.
+  for (const t of ['ne me renvoie pas vos promos', 'je ne veux plus recevoir vos messages', 'Ne me contactez plus', 'stop'])
+    assert.notEqual(lev(t), 'lever', t)
+  assert.equal(lev('Ne me contactez plus', { appelModele: true }), 'rien')
+  // La reponse a la question (une seule fois).
+  const o = { dernierBot: N.QUESTION_REPRISE_MESSAGES }
+  for (const t of ['oui', 'Oui stp', 'ok', "d'accord !", 'vas-y', 'volontiers']) assert.equal(lev(t, o), 'lever', t)
+  for (const t of ['non', 'non merci', 'bof', 'je sais pas']) assert.equal(lev(t, o), 'rien', t)
+  assert.ok(N.estQuestionReprise(`${N.QUESTION_REPRISE_MESSAGES}\n[Contacter l'équipe]`))
+  // La question de la pose ne vaut pas question de levee.
+  assert.equal(lev('oui', { dernierBot: N.QUESTION_DOUTE_NE_PLUS_CONTACTER }), 'rien')
+})
+
+bloc('etat courant : pose, levee, re-pose (le lanceur et les tips le suivent)', () => {
+  const R = N.REGLE_NE_PLUS_CONTACTER
+  const L = N.REGLE_NE_PLUS_CONTACTER_LEVE
+  assert.equal(L, 'ne_plus_contacter_leve')
+  const ligne = (id, regle, quand, o = {}) => ({ telegram_id: 42, geste: 'rappel', resultat: 'fait', regle, fait_le: quand, geste_id: id, ...o })
+  const etat = (lignes) => N.etatCourantNePlusContacter(lignes, 42)
+  assert.equal(etat([]), false)
+  const pose = ligne(1, R, '2026-11-27T10:00:00Z')
+  assert.equal(etat([pose]), true, 'pose')
+  const levee = ligne(2, L, '2026-11-28T10:00:00Z')
+  assert.equal(etat([pose, levee]), false, 'levee')
+  const repose = ligne(3, R, '2026-11-29T10:00:00Z')
+  assert.equal(etat([pose, levee, repose]), true, 're-pose')
+  assert.equal(etat([repose, levee, pose]), true, "l'ordre des lignes ne compte pas")
+  // Meme instant : geste_id departage.
+  assert.equal(etat([ligne(5, R, '2026-11-27T10:00:00Z'), ligne(6, L, '2026-11-27T10:00:00Z')]), false)
+  // Les autres lignes ne comptent pas : autre personne, autre geste, echec, autre regle.
+  assert.equal(etat([pose, { ...levee, telegram_id: 7 }, { ...levee, geste: 'retrait' }, { ...levee, resultat: 'echec' }, { ...levee, regle: 'tip_accueil' }]), true)
+  // L'ancien predicat du lanceur (exists sur la pose) se trompe apres une levee : il faut l'etat courant.
+  const ancien = (lignes) => lignes.some(g => g.telegram_id === 42 && g.geste === 'rappel' && g.regle === R && g.resultat === 'fait')
+  assert.equal(ancien([pose, levee]), true)
+  assert.equal(etat([pose, levee]), false)
+})
+
+bloc('le serveur ecrit et lit l etat courant (pose, levee, re-pose)', () => {
   const s = lire('src/lib/liveclub/ne-plus-contacter.ts')
-  // L'ecriture : geste 'rappel', resultat 'fait', la regle, la personne.
-  assert.match(s, /insert into public\.cockpit_liveclub_gestes \(telegram_id, geste, resultat, acteur, regle, details\)/)
-  assert.match(s, /select \$\{telegramId\}::bigint, 'rappel', 'fait', \$\{ACTEUR_BOT_MEMBRE\}, \$\{REGLE_NE_PLUS_CONTACTER\}/)
-  // La lecture du passage : le meme predicat que le lanceur.
-  assert.match(s, /g\.geste = 'rappel'\s+and g\.regle = \$\{REGLE_NE_PLUS_CONTACTER\} and g\.resultat = 'fait'/)
-  // Le predicat du lanceur (bf-anciens.ts, lireEtatAncien, 27/11), rejoue sur la ligne que le bot ecrit.
-  const lanceurLit = (lignes, tid) => lignes.some(g => g.telegram_id === tid && g.geste === 'rappel' && g.regle === 'ne_plus_contacter' && g.resultat === 'fait')
-  const ligneDuBot = { telegram_id: 42, geste: 'rappel', resultat: 'fait', acteur: 'bot:membre', regle: N.REGLE_NE_PLUS_CONTACTER, details: N.detailsMarqueur('agent', new Date('2026-11-27T10:00:00Z')) }
-  assert.ok(lanceurLit([ligneDuBot], 42))
-  assert.ok(!lanceurLit([ligneDuBot], 43))
-  assert.deepEqual(ligneDuBot.details, { origine: 'agent', demande_le: '2026-11-27' })
-  // Le lanceur lui-meme, s'il est la (branche bf-anciens, worktree voisin) : la meme regle, le meme predicat.
+  // L'etat courant en SQL : la derniere des deux regles, fait_le puis geste_id.
+  assert.match(s, /select e\.regle = \$\{REGLE_NE_PLUS_CONTACTER\} from public\.cockpit_liveclub_gestes e\n\s+where e\.telegram_id = \$\{telegramId\}::bigint and e\.geste = 'rappel' and e\.resultat = 'fait'\n\s+and e\.regle in \(\$\{REGLE_NE_PLUS_CONTACTER\}, \$\{REGLE_NE_PLUS_CONTACTER_LEVE\}\)\n\s+order by e\.fait_le desc, e\.geste_id desc\n\s+limit 1\), false\)/)
+  // Une ecriture : geste 'rappel', resultat 'fait', la regle voulue, seulement si l'etat courant est l'inverse.
+  assert.match(s, /insert into public\.cockpit_liveclub_gestes \(telegram_id, geste, resultat, acteur, regle, details\)\n\s+select \$\{telegramId\}::bigint, 'rappel', 'fait', \$\{ACTEUR_BOT_MEMBRE\}, \$\{regle\}/)
+  assert.match(s, /where \$\{sqlNePlusContacter\(telegramId\)\} = \$\{attendu\}/)
+  assert.match(s, /pg_advisory_xact_lock\(hashtextextended\(\$\{`liveclub:ne_plus_contacter:\$\{telegramId\}`\}/)
+  // Pose : etat attendu false (donc re-pose apres une levee) ; levee : etat attendu true.
+  assert.match(s, /ecrire\(telegramId, REGLE_NE_PLUS_CONTACTER, false,/)
+  assert.match(s, /ecrire\(telegramId, REGLE_NE_PLUS_CONTACTER_LEVE, true,/)
+  // Aucune suppression.
+  assert.ok(!/delete from|update public\.cockpit_liveclub_gestes/i.test(s))
+  // La lecture : l'etat courant.
+  assert.match(s, /select \$\{sqlNePlusContacter\(telegramId\)\} as pose/)
+  // Rejoue : la suite d'ecritures que le serveur autorise, appliquee a un journal en memoire.
+  const journal = []
+  let id = 0
+  const ecrire = (regle, attendu, quand) => {
+    if (N.etatCourantNePlusContacter(journal, 42) !== attendu) return 'deja'
+    journal.push({ telegram_id: 42, geste: 'rappel', resultat: 'fait', regle, fait_le: quand, geste_id: ++id })
+    return 'ecrit'
+  }
+  const poser = (q) => ecrire(N.REGLE_NE_PLUS_CONTACTER, false, q)
+  const lever = (q) => ecrire(N.REGLE_NE_PLUS_CONTACTER_LEVE, true, q)
+  assert.equal(lever('2026-11-26T09:00:00Z'), 'deja', 'rien a lever')
+  assert.equal(poser('2026-11-27T09:00:00Z'), 'ecrit')
+  assert.equal(poser('2026-11-27T09:01:00Z'), 'deja', 'une seule pose')
+  assert.equal(lever('2026-11-28T09:00:00Z'), 'ecrit')
+  assert.equal(lever('2026-11-28T09:01:00Z'), 'deja', 'une seule levee')
+  assert.equal(poser('2026-11-29T09:00:00Z'), 'ecrit', 're-pose apres levee')
+  assert.equal(journal.length, 3)
+  assert.equal(N.etatCourantNePlusContacter(journal, 42), true)
+})
+
+bloc('le lanceur des anciens et les tips lisent l etat courant', () => {
+  assert.equal(N.REGLE_NE_PLUS_CONTACTER, 'ne_plus_contacter')
+  assert.deepEqual(N.detailsMarqueur('agent', new Date('2026-11-27T10:00:00Z')), { origine: 'agent', demande_le: '2026-11-27' })
+  // Les conseils d'accueil du passage lisent l'etat courant (nePlusContacterPose) avant tout envoi.
+  const p = lire('src/lib/liveclub/passage.ts')
+  assert.match(p, /const nePlus = await nePlusContacterPose\(tid\)\n\s+if \(nePlus === null\) \{ s\.inconnus\+\+; return \}\n\s+if \(nePlus\) \{ s\.ne_plus_contacter\+\+; return \}/)
+  assert.ok(p.indexOf('nePlusContacterPose(tid)') < p.indexOf("cle: `liveclub:tip_accueil:"), 'lu avant la reservation du conseil')
+  // Le lanceur (branche bf-anciens, worktree voisin, non poussee, pas touchee ici) : meme regle ;
+  // sa condition doit passer a l'etat courant (sqlNePlusContacter).
   const voisin = new URL('../../journal-bf-anciens/src/lib/liveclub/', import.meta.url)
   if (existsSync(new URL('bf-anciens.ts', voisin))) {
     const pur = readFileSync(new URL('bf-anciens-pur.ts', voisin), 'utf8')
     const serveur = readFileSync(new URL('bf-anciens.ts', voisin), 'utf8')
     assert.match(pur, /export const REGLE_NE_PLUS_CONTACTER = 'ne_plus_contacter'/)
-    assert.match(serveur, /g\.geste = 'rappel' and g\.regle = \$\{REGLE_NE_PLUS_CONTACTER\}\s+and g\.resultat = 'fait'/)
-    console.log('    (lanceur bf-anciens relu dans le worktree voisin : meme regle, meme predicat)')
+    if (/sqlNePlusContacter|ne_plus_contacter_leve|REGLE_NE_PLUS_CONTACTER_LEVE/.test(serveur)) {
+      console.log('    (lanceur bf-anciens relu : il lit l etat courant)')
+    } else {
+      assert.match(serveur, /g\.geste = 'rappel' and g\.regle = \$\{REGLE_NE_PLUS_CONTACTER\}\s+and g\.resultat = 'fait'/)
+      console.log('    A CHANGER dans bf-anciens : lireEtatAncien lit encore « exists » (une levee y resterait exclue) ; remplacer par sqlNePlusContacter')
+    }
   } else {
-    console.log('    (lanceur bf-anciens absent : predicat rejoue seulement)')
+    console.log('    (lanceur bf-anciens absent : etat courant rejoue seulement)')
   }
-  // Les conseils d'accueil du passage lisent le marqueur avant tout envoi.
-  const p = lire('src/lib/liveclub/passage.ts')
-  assert.match(p, /const nePlus = await nePlusContacterPose\(tid\)\n\s+if \(nePlus === null\) \{ s\.inconnus\+\+; return \}\n\s+if \(nePlus\) \{ s\.ne_plus_contacter\+\+; return \}/)
-  assert.ok(p.indexOf('nePlusContacterPose(tid)') < p.indexOf("cle: `liveclub:tip_accueil:"), 'lu avant la reservation du conseil')
 })
 
 bloc('textes du bot', () => {
@@ -176,27 +268,35 @@ bloc('textes du bot', () => {
   texteSain(N.TEXTE_NE_PLUS_CONTACTER_PANNE, 'panne')
   assert.match(N.TEXTE_NE_PLUS_CONTACTER_NOTE, /Tu peux toujours m'écrire/)
   assert.match(N.QUESTION_DOUTE_NE_PLUS_CONTACTER, /abonnement.*messages \?$/)
-  assert.ok(!/\bvous\b/i.test(N.TEXTE_NE_PLUS_CONTACTER_NOTE + N.QUESTION_DOUTE_NE_PLUS_CONTACTER), 'tutoiement')
+  texteSain(N.TEXTE_REPRISE_MESSAGES_NOTE, 'confirmation de la levee')
+  texteSain(N.QUESTION_REPRISE_MESSAGES, 'question de la levee')
+  assert.ok(!/\bvous\b/i.test(N.TEXTE_NE_PLUS_CONTACTER_NOTE + N.QUESTION_DOUTE_NE_PLUS_CONTACTER + N.TEXTE_REPRISE_MESSAGES_NOTE + N.QUESTION_REPRISE_MESSAGES), 'tutoiement')
 })
 
 bloc('cablage : outil de l agent, consigne, aucun bouton', () => {
-  const outil = PM.OUTILS_MEMBRE.find(o => o.name === N.NOM_OUTIL_NE_PLUS_CONTACTER)
-  assert.ok(outil, 'outil dans OUTILS_MEMBRE')
-  assert.deepEqual(outil.input_schema.properties, {})
+  for (const nom of [N.NOM_OUTIL_NE_PLUS_CONTACTER, N.NOM_OUTIL_REPRENDRE_MESSAGES]) {
+    const outil = PM.OUTILS_MEMBRE.find(o => o.name === nom)
+    assert.ok(outil, nom)
+    assert.deepEqual(outil.input_schema.properties, {})
+  }
   assert.ok(PM.SYSTEM_PROMPT_MEMBRE.includes(N.CONSIGNE_NE_PLUS_CONTACTER))
-  assert.match(N.CONSIGNE_NE_PLUS_CONTACTER, /Tu ne proposes jamais cette possibilité/)
+  assert.ok(N.CONSIGNE_NE_PLUS_CONTACTER.includes(N.NOM_OUTIL_REPRENDRE_MESSAGES))
+  assert.match(N.CONSIGNE_NE_PLUS_CONTACTER, /Tu ne proposes jamais l'une ou l'autre possibilité/)
   assert.match(N.CONSIGNE_NE_PLUS_CONTACTER, /il garde le groupe/)
   const agent = lire('src/lib/liveclub/agent-membre.ts')
   assert.match(agent, /decisionNePlusContacter\(question, \{ dernierBot: dernierMessageDuBot\(historique\), appelModele: true \}\)/)
-  assert.match(agent, /if \(prudence && bloc\.name === NOM_OUTIL_NE_PLUS_CONTACTER\) \{\n\s+resultats\.push\(\{ type: 'tool_result', tool_use_id: bloc\.id, content: JSON\.stringify\(REFUS_PRUDENCE_MEMBRE\) \}\)/, 'refuse sous prudence')
+  assert.match(agent, /if \(prudence && \(bloc\.name === NOM_OUTIL_NE_PLUS_CONTACTER \|\| bloc\.name === NOM_OUTIL_REPRENDRE_MESSAGES\)\) \{\n\s+resultats\.push\(\{ type: 'tool_result', tool_use_id: bloc\.id, content: JSON\.stringify\(REFUS_PRUDENCE_MEMBRE\) \}\)/, 'refuse sous prudence')
   // Le refus sous prudence passe AVANT le traitement de l'outil.
-  assert.ok(agent.indexOf('prudence && bloc.name === NOM_OUTIL_NE_PLUS_CONTACTER') < agent.indexOf('if (bloc.name === NOM_OUTIL_NE_PLUS_CONTACTER) {'))
+  const refus = agent.indexOf('prudence && (bloc.name === NOM_OUTIL_NE_PLUS_CONTACTER')
+  assert.ok(refus > 0 && refus < agent.indexOf('if (bloc.name === NOM_OUTIL_NE_PLUS_CONTACTER) {'))
+  assert.ok(refus < agent.indexOf('if (bloc.name === NOM_OUTIL_REPRENDRE_MESSAGES) {'))
+  assert.match(agent, /decisionReprendreMessages\(question, \{ dernierBot: dernierMessageDuBot\(historique\), appelModele: true \}\)/)
   const bot = lire('src/lib/liveclub/bot-membre.ts')
   assert.match(bot, /decisionNePlusContacter\(texte, \{ dernierBot: dernierMessageDuBot\(etat\?\.messages\) \}\)/)
   // Aucun bouton : ni dans les claviers, ni dans un callback.
   const tg = lire('src/lib/liveclub/telegram.ts') + bot
-  assert.ok(!/(desabonn|ne_plus_contacter|ne plus recevoir)[^\n]*callback_data|callback_data[^\n]*(desabonn|ne_plus)/i.test(tg))
-  assert.ok(!/clavier\w*\([^)]*\)[^\n]*NE_PLUS|NE_PLUS[^\n]*clavier(?!Equipe)/.test(bot))
+  assert.ok(!/(desabonn|ne_plus_contacter|ne plus recevoir|reprendre_nos_messages)[^\n]*callback_data|callback_data[^\n]*(desabonn|ne_plus|reprendre_nos)/i.test(tg))
+  assert.ok(!/clavier\w*\([^)]*\)[^\n]*(NE_PLUS|REPRISE_MESSAGES)|(NE_PLUS|REPRISE_MESSAGES)[^\n]*clavier(?!Equipe)/.test(bot))
 })
 
 console.log(`\n${n} blocs ok`)
