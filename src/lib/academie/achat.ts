@@ -28,8 +28,9 @@
 
 import { prisma } from '@/lib/db'
 import { oublierDroitsDuCompte } from '@/lib/trouver-cours'
-import { sansRemiseAppliquee, type RemiseCheckout } from '@/lib/code-promo-pur'
+import { libelleRemise, remiseAppliquee, sansRemiseAppliquee, type RemiseCheckout } from '@/lib/code-promo-pur'
 import { corpsSession, lireAchat, type AchatLu, type LectureAchat, type OffreEnVente } from './achat-pur'
+import { estPrecommande, TEXTE_CONDITIONS_PRECOMMANDE, TEXTE_SUBMIT_PRECOMMANDE } from './precommande-pur'
 import {
   SQL_COMPLETER_PAIEMENT, SQL_COMPTES_DE_EMAIL, SQL_EMAIL_CONFIRME, SQL_OFFRE_EN_VENTE, SQL_OFFRE_PARTIE_EN_VENTE, SQL_POSER_ACHAT,
   SQL_RETIRER_REMBOURSE,
@@ -102,6 +103,10 @@ export async function offreEnVente(slug: string): Promise<(OffreEnVente & { prix
     moduleSlug: l.module_slug, moduleTitre: l.module_titre, offreSlug: l.offre_slug, stripePriceId: l.stripe_price_id,
     // (20/11/2026) Le prix courant du module : la base du prix membre (prixDuCompte, prix-membre.ts).
     prixEur: Number(l.prix_eur),
+    // (27/11/2026) L'e-book en precommande : textes de Checkout sans renonciation, avec la livraison.
+    ...(estPrecommande(l.offre_slug)
+      ? { precommande: { conditions: TEXTE_CONDITIONS_PRECOMMANDE, submit: TEXTE_SUBMIT_PRECOMMANDE } }
+      : {}),
   }
 }
 
@@ -150,10 +155,10 @@ export async function appelerAvecRemise(
   try {
     return { corps: await appeler(cle, '/v1/checkout/sessions', corps(remise)), remise }
   } catch (err) {
-    const applique = remise !== null && 'promotionCode' in remise
-    if (!applique || !(err instanceof ErreurStripe) || err.statut !== 400 || err.permission || err.conditions) throw err
-    console.warn(`[${journal}] Stripe refuse la remise BF26 (${err.type}), session recreee avec le champ code promo seul`)
+    // (27/11/2026) Un coupon refuse (e-book) : la session est recreee sans remise (sansRemiseAppliquee).
+    if (!remiseAppliquee(remise) || !(err instanceof ErreurStripe) || err.statut !== 400 || err.permission || err.conditions) throw err
     const repli = sansRemiseAppliquee(remise)
+    console.warn(`[${journal}] Stripe refuse la remise${libelleRemise(remise)} (${err.type}), session recreee${repli ? ' avec le champ code promo seul' : ' sans remise'}`)
     return { corps: await appeler(cle, '/v1/checkout/sessions', corps(repli)), remise: repli }
   }
 }

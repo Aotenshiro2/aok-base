@@ -50,6 +50,13 @@ export type OffreEnVente = {
    * ouvre. Absent : le prix courant.
    */
   tarif?: string | null
+  /**
+   * (27/11/2026) Une precommande (l'e-book, precommande-pur.ts) : la case a
+   * cocher dit les conditions seules (pas de renonciation, rien n'est fourni
+   * tout de suite) et le texte du bouton dit la livraison. Absent : un module
+   * ouvert tout de suite, comme avant.
+   */
+  precommande?: { conditions: string; submit: string } | null
 }
 
 /**
@@ -107,7 +114,8 @@ export function corpsSession(o: OffreEnVente, p: {
   c.set('customer_creation', 'always')
   // Exige une URL de conditions dans les reglages publics du compte Stripe (sinon Stripe refuse la session).
   c.set('consent_collection[terms_of_service]', 'required')
-  c.set('custom_text[terms_of_service_acceptance][message]', TEXTE_RETRACTATION)
+  c.set('custom_text[terms_of_service_acceptance][message]', o.precommande ? o.precommande.conditions : TEXTE_RETRACTATION)
+  if (o.precommande) c.set('custom_text[submit][message]', o.precommande.submit)
   if (p.userId) {
     c.set('client_reference_id', p.userId)
     c.set('metadata[user_id]', p.userId)
@@ -117,6 +125,8 @@ export function corpsSession(o: OffreEnVente, p: {
   c.set('metadata[academie_module]', o.moduleSlug)
   c.set('metadata[academie_offre]', o.offreSlug)
   c.set('metadata[essai]', p.essai ? '1' : '0')
+  // (27/11/2026) Une precommande : lireAchat ne note aucune renonciation au droit de retractation.
+  if (o.precommande) c.set('metadata[precommande]', '1')
   // Le libelle du paiement : c'est lui que le pipeline du cockpit lit pour
   // classer la vente (push_membres_supabase.py, MOTIFS_OFFRES « ^academie aok »).
   c.set('payment_intent_data[description]', `Académie AOK : ${o.partie?.trim() || o.moduleTitre}`.slice(0, 900))
@@ -129,8 +139,10 @@ export function corpsSession(o: OffreEnVente, p: {
   }
   if (typeof p.expiresAt === 'number' && Number.isInteger(p.expiresAt) && p.expiresAt > 0) c.set('expires_at', String(p.expiresAt))
   // BF26 : la remise appliquee OU le champ, jamais les deux (Stripe refuse), jamais avec un tarif membre.
+  // (27/11/2026) Le coupon de l'e-book : discounts[0][coupon] (remiseEbook, precommande-pur.ts).
   const r = o.tarif ? null : p.remise ?? null
   if (r && 'promotionCode' in r) c.set('discounts[0][promotion_code]', r.promotionCode)
+  else if (r && 'coupon' in r) c.set('discounts[0][coupon]', r.coupon)
   else if (r) c.set('allow_promotion_codes', 'true')
   return c
 }
@@ -212,7 +224,8 @@ export function lireAchat(s: Record<string, unknown>): LectureAchat {
       chargeId: chargeDe(s.payment_intent),
       essai: meta.essai === '1',
       payeLe: cree,
-      renonciationLe: consent.terms_of_service === 'accepted' ? cree : null,
+      // (27/11/2026) Une precommande coche les conditions seules : aucune renonciation a noter.
+      renonciationLe: consent.terms_of_service === 'accepted' && meta.precommande !== '1' ? cree : null,
       // Pose seulement s'il y en a un : les sessions d'avant restent lues a l'identique.
       ...(chaine(meta.academie_tarif) ? { tarif: chaine(meta.academie_tarif) } : {}),
     },

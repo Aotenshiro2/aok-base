@@ -9,6 +9,7 @@ import {
 } from '@/lib/academie/prix-membre-pur'
 import { compteDuJeton, corsAcademie, entetesAcademie, refusAcademie, tronquer } from '@/lib/academie/http'
 import { libelleRemise, promoBf26, remiseCheckout } from '@/lib/code-promo-pur'
+import { couponEbook, estPrecommande, remiseEbook, retourPrecommande } from '@/lib/academie/precommande-pur'
 import { messageErreur } from '@/lib/liveclub/pur'
 
 /**
@@ -48,6 +49,11 @@ import { messageErreur } from '@/lib/liveclub/pur'
  * connecte membre du Live Club (ventePartie) : sinon 403
  * 'partie_reservee_membres' { message } ; Live Club illisible, 503 'membre_inconnu'.
  *
+ * Precommande de l'e-book (27/11/2026, Orchestre Prix : pas de route nouvelle) : le module
+ * ebook-la-strategie-qui-te-ressemble se vend ici, retour sur sa page du site
+ * (/library/ebook-la-strategie-qui-te-ressemble, retourPrecommande), sans tarif membre ni BF26 :
+ * le coupon de l'e-book jusqu'a COUPON_EBOOK_JUSQUA, puis le prix plein (precommande-pur.ts).
+ *
  * 200 { ok, client_secret, session_id, cle_publique }
  * 400 'corps' | 403 'ferme' | 404 'module' (pas en vente) | 503 'config' (cle absente ou sans permission) | 502 'stripe'
  * 503 'membre_inconnu' (27/11/2026) : un tarif membre vaut mais le statut du compte n'a pas pu etre verifie ;
@@ -71,7 +77,8 @@ export async function POST(req: NextRequest) {
   let corps: Record<string, unknown>
   try { corps = (await req.json()) as Record<string, unknown> } catch { return refus('corps', 400) }
   const slug = typeof corps.module === 'string' && /^[a-z0-9-]{1,80}$/.test(corps.module) ? corps.module : null
-  const retour = retourSur(corps.retour)
+  // (27/11/2026) L'e-book revient sur sa page du site, seule exception aux pages de l'academie.
+  const retour = slug ? retourSur(corps.retour) ?? retourPrecommande(corps.retour, slug) : null
   if (!slug || !retour) return refus('corps', 400)
   // Une partie : son slug doit nommer une partie de CE module ; envoye mais illisible, on refuse (jamais le module a sa place).
   const partie = corps.offre === undefined || corps.offre === null ? null : offrePartie(corps.offre, slug)
@@ -126,7 +133,9 @@ export async function POST(req: NextRequest) {
   // base pour l'offre, ou si la base ou ses droits sont illisibles : le prix courant (Checkout affiche le montant avant
   // le paiement). La page n'envoie jamais de prix.
   let expiresAt: number | null = null
-  if (userId && prixCourant !== null && prixCourant > 0) {
+  // (27/11/2026) La precommande de l'e-book : meme prix pour tout le monde, aucun tarif membre.
+  const precommande = estPrecommande(offre.offreSlug)
+  if (!precommande && userId && prixCourant !== null && prixCourant > 0) {
     const maintenant = new Date()
     let calcul: Awaited<ReturnType<typeof prixDuCompte>> | null = null
     try {
@@ -152,7 +161,10 @@ export async function POST(req: NextRequest) {
   const retourUrl = `${base}${retour}?achat_session={CHECKOUT_SESSION_ID}`
   // (27/11/2026, Black Friday) BF26 deja applique (discounts), a defaut son champ (allow_promotion_codes) : au prix
   // courant seulement, jamais avec un tarif membre, jusqu'a CODE_PROMO_JUSQUA (code-promo-pur.ts).
-  const remise = remiseCheckout({ quand: new Date(), prixMembre: Boolean(offre.tarif), promo: promoBf26(process.env) })
+  // (27/11/2026) L'e-book : son coupon seul (jamais BF26), jusqu'a COUPON_EBOOK_JUSQUA ; apres, ou sans coupon, rien.
+  const remise = precommande
+    ? remiseEbook({ quand: new Date(), coupon: couponEbook(process.env) })
+    : remiseCheckout({ quand: new Date(), prixMembre: Boolean(offre.tarif), promo: promoBf26(process.env) })
 
   try {
     const s = await creerSession(cle, offre, { retourUrl, userId, email, essai, expiresAt, remise })

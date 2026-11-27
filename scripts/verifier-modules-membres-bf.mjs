@@ -205,7 +205,8 @@ bloc('affichage (/moi) : le tarif du module seulement pour un membre, pendant la
 
 bloc('code : la carte vend aussi le module entier au tarif, /moi et prixDuCompte passent par membreDuTarif', () => {
   const carte = lire('../src/app/api/academie/achat/route.ts')
-  assert.match(carte, /if \(userId && prixCourant !== null && prixCourant > 0\) \{/, 'plus de condition « partie »')
+  // (27/11/2026) Seule exception : la precommande de l'e-book, meme prix pour tout le monde (verifier-precommande-ebook.mjs).
+  assert.match(carte, /if \(!precommande && userId && prixCourant !== null && prixCourant > 0\) \{/, 'plus de condition « partie »')
   // (28/11/2026) Les droits deja lus pour une partie (ventePartieDuCompte) sont passes, sinon prixDuCompte les lit.
   assert.match(carte, /prixDuCompte\(\{ userId, offre: offre\.offreSlug, prixCourantEur: prixCourant, quand: maintenant, droits: vente\.droits \?\? undefined \}\)/)
   assert.doesNotMatch(carte, /corps\.prix|corps\.montant/, 'jamais un prix venu de la page')

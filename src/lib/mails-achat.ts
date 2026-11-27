@@ -27,6 +27,7 @@ import {
   lienDuModule, lienPortailPropre, lireSessionPayee, planMailHorsPilotage, produitDeOffrePilotage, rendreMail, soutienDeLAchat,
   type IssueMail, type ProduitMail, type VariablesMail,
 } from '@/lib/mails-achat-pur'
+import { estPrecommande, LIVRAISON_EBOOK, PAGE_EBOOK } from '@/lib/academie/precommande-pur'
 
 export type { IssueMail }
 
@@ -173,11 +174,14 @@ export async function mailAchatModule(p: {
   } catch (err) {
     console.warn(`[mails-achat] titre du ${partie ? 'module (partie)' : 'module'} illisible : ${messageErreur(err)}`)
   }
+  // (27/11/2026) L'e-book en precommande : le mail dit « précommande enregistrée » et renvoie a sa page du site.
+  const precommande = estPrecommande(p.offreSlug ?? `module-${p.moduleSlug}`)
   return envoyerMailAchat('module', p.sessionId, {
     prenom: s?.prenom ?? null,
     montant: formaterEuros(p.montantEur === null ? s?.centimes : Math.round(p.montantEur * 100)),
     titreModule: titre ?? p.moduleSlug,
-    lienModule: lienDuModule(p.moduleSlug),
+    lienModule: precommande ? `https://aoknowledge.com${PAGE_EBOOK}` : lienDuModule(p.moduleSlug),
+    ...(precommande ? { precommande: LIVRAISON_EBOOK } : {}),
     email,
     essai: p.essai || !!s?.test,
   })

@@ -286,7 +286,7 @@ export function corpsSessionAbonnement(o: {
    * le 1er paiement seulement) ou son champ seul (allow_promotion_codes) :
    * remiseCheckout (code-promo-pur.ts) le decide. Jamais en soutien, meme demande.
    */
-  remise?: { promotionCode: string } | { champ: true } | null
+  remise?: { promotionCode: string } | { coupon: string } | { champ: true } | null
 }): URLSearchParams {
   const produit = produitDe(o.slug)
   const c = new URLSearchParams()
@@ -319,6 +319,8 @@ export function corpsSessionAbonnement(o: {
   // BF26 : la remise appliquee OU le champ, jamais les deux (Stripe refuse), jamais en soutien.
   const r = o.soutien ? null : o.remise ?? null
   if (r && 'promotionCode' in r) c.set('discounts[0][promotion_code]', r.promotionCode)
+  // (27/11/2026) Le type commun (RemiseCheckout) porte aussi un coupon direct ; aucun abonnement n'en recoit aujourd'hui.
+  else if (r && 'coupon' in r) c.set('discounts[0][coupon]', r.coupon)
   else if (r) c.set('allow_promotion_codes', 'true')
   return c
 }

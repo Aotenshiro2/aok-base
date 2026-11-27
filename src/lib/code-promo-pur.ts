@@ -45,8 +45,12 @@ export const PROMO_BF26 = 'promo_1UgU4LEAT4qWdUNVNqM26u27'
  */
 export const VARIABLE_PROMO_BF26 = 'STRIPE_PROMO_BF26'
 
-/** Ce que la session Checkout recoit : la remise appliquee, le champ seul, ou rien. */
-export type RemiseCheckout = { promotionCode: string } | { champ: true } | null
+/**
+ * Ce que la session Checkout recoit : la remise appliquee, le champ seul, ou rien.
+ * (27/11/2026) { coupon } : un coupon pose directement (discounts[0][coupon]), la
+ * precommande de l'e-book seulement (remiseEbook, academie/precommande-pur.ts).
+ */
+export type RemiseCheckout = { promotionCode: string } | { coupon: string } | { champ: true } | null
 
 const ID_PROMO = /^promo_[A-Za-z0-9]+$/
 
@@ -83,9 +87,17 @@ export function remiseCheckout(p: Parameters<typeof champCodePromo>[0] & { promo
   return p.promo ? { promotionCode: p.promo } : { champ: true }
 }
 
-/** Repli quand Stripe refuse la remise : le champ seul. */
-export const sansRemiseAppliquee = (r: RemiseCheckout): RemiseCheckout => (r ? { champ: true } : null)
+/**
+ * Repli quand Stripe refuse la remise : le champ seul. Un coupon refuse (e-book) :
+ * rien, ni coupon ni champ (BF26 ne vaut pas sur l'e-book), la vente continue au prix plein.
+ */
+export const sansRemiseAppliquee = (r: RemiseCheckout): RemiseCheckout =>
+  (!r || 'coupon' in r ? null : { champ: true })
+
+/** La remise est-elle appliquee d'office (code promo ou coupon), donc refusable par Stripe ? */
+export const remiseAppliquee = (r: RemiseCheckout): boolean =>
+  r !== null && ('promotionCode' in r || 'coupon' in r)
 
 /** Pour les journaux : ce qui a ete pose. */
 export const libelleRemise = (r: RemiseCheckout): string =>
-  !r ? '' : 'promotionCode' in r ? ' remise_bf26' : ' code_promo'
+  !r ? '' : 'promotionCode' in r ? ' remise_bf26' : 'coupon' in r ? ' coupon_ebook' : ' code_promo'

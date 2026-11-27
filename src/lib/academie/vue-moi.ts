@@ -7,6 +7,7 @@ import type { Catalogue, LeconCatalogue, SectionCatalogue } from './catalogue'
 import type { Droits } from './pur'
 import { etatLecon, ouvertureLecon, ouvertureModule, ouvertureSection, progressionDuModule, type Resultat } from './pur'
 import type { ProgressionLecon } from './suivi'
+import { visibleDansLaVue } from './precommande-pur'
 
 const iso = (d: Date | null | undefined) => d?.toISOString() ?? null
 
@@ -45,7 +46,9 @@ export function construire(catalogue: Catalogue, droits: Droits, progression: Ma
   const leconsParModule = grouper<LeconCatalogue>(catalogue.lecons, l => l.moduleId)
   const resultats = new Map<string, Resultat>()
 
-  const modules = catalogue.modules.map(m => {
+  // (27/11/2026) Un module qui n'est pas un cours (l'e-book en precommande, precommande-pur.ts) : seulement chez qui
+  // l'a achete. Jamais pour un visiteur (/catalogue) ni pour un droit qui ouvre tout (ETM, admin).
+  const modules = catalogue.modules.filter(m => visibleDansLaVue(m, droits.ouvertures)).map(m => {
     // Module a lien externe (Masterclass, 26/10/2026) : une carte qui envoie vers un autre site de
     // l'ecosysteme. Pas de lecons, pas de cadenas (l'acces se gere la-bas), compte dans aucun pourcentage.
     if (m.lienExterne) {

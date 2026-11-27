@@ -49,6 +49,11 @@ export type VariablesMail = {
   lienPortail?: string | null
   titreModule?: string | null
   lienModule?: string | null
+  /**
+   * (27/11/2026) Une precommande (l'e-book) : sa livraison dans une phrase (« en février 2027 »).
+   * Le mail du module dit alors « précommande enregistrée », sans accès ouvert ni renonciation.
+   */
+  precommande?: string | null
   /** Le mail de soutien : ce que l'achat soutient (soutienDeLAchat). */
   soutien?: AppSoutien | null
   email: string
@@ -166,7 +171,32 @@ export function modeleCarnetPremium(v: VariablesMail): ModeleMail {
 /** L'adresse d'un module (meme forme que lienModule, trouver-cours-pur.ts). */
 export const lienDuModule = (slug: string) => `${URL_ACADEMIE_MAIL}/${encodeURIComponent(slug)}`
 
+/**
+ * (27/11/2026) La precommande de l'e-book : rien n'est ouvert aujourd'hui, le livre part a sa sortie.
+ * Pas de phrase de renonciation (la case de Checkout ne la demande pas, precommande-pur.ts).
+ */
+function modelePrecommande(v: VariablesMail, livraison: string): ModeleMail {
+  const titre = v.titreModule ? `« ${v.titreModule} »` : "l'e-book"
+  const lien = v.lienModule || 'https://aoknowledge.com'
+  const paiement = v.montant
+    ? `Merci, votre paiement est bien passé : ${v.montant} pour la précommande de ${titre}.`
+    : `Merci, votre paiement est bien passé pour la précommande de ${titre}.`
+  return {
+    objet: objetDe(v, 'Votre précommande est enregistrée'),
+    preheader: `Vous recevrez l'e-book par mail à sa sortie, ${livraison}.`,
+    paragraphes: [
+      bonjour(v),
+      `${paiement} Votre précommande est enregistrée.`,
+      `Vous recevrez l'e-book par mail à sa sortie, ${livraison}, à cette adresse : ${v.email}.`,
+      RECU_MON_ESPACE,
+      QUESTION,
+    ],
+    bouton: { texte: "Revoir la page de l'e-book", url: lien },
+  }
+}
+
 export function modeleModule(v: VariablesMail): ModeleMail {
+  if (v.precommande) return modelePrecommande(v, v.precommande)
   // Le webhook donne toujours un titre (la base, sinon le slug) : le repli ne sert qu'a ne jamais laisser de trou.
   const leModule = v.titreModule ? `le module « ${v.titreModule} »` : 'votre module'
   const lien = v.lienModule || URL_ACADEMIE_MAIL
