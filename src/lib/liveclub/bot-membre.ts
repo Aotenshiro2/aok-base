@@ -147,6 +147,12 @@ import {
   type ChoixCompte, type CompteTelegramLu,
 } from './comptes-telegram-pur'
 import { repondreAuMembre } from './agent-membre'
+// (27/11) Ne plus recevoir nos messages, compte non rattache (ne-plus-contacter-pur.ts).
+import {
+  QUESTION_DOUTE_NE_PLUS_CONTACTER, TEXTE_NE_PLUS_CONTACTER_NOTE, TEXTE_NE_PLUS_CONTACTER_PANNE,
+  decisionNePlusContacter, dernierMessageDuBot,
+} from './ne-plus-contacter-pur'
+import { poserNePlusContacter } from './ne-plus-contacter'
 import { contexteAccesOffert } from './prompt-membre'
 import {
   annulerDemandeEquipe, direAttenteUneFois, enregistrerEchangeSupport, estEnAttenteHumain, lireEtatFil, lireMessagesFil,
@@ -1361,6 +1367,21 @@ async function traiterNonRattache(
   if (etat?.attend) {
     await repondreEnAttente(chat, u, masquerCodes(texte), null, clavierSansRattachement(), etat, recuLe)
     return
+  }
+  // (27/11, Brice) NE PLUS CONTACTER, sans agent (compte non rattache, un
+  // ancien par exemple) : la meme decision pure que l'outil de l'agent, comme
+  // intentionNonRattache lit l'email et le code. Demande nette : le marqueur et
+  // la confirmation ; « me desabonner » : la question de doute ; sa reponse
+  // « mon abonnement », une duree, un autre service : le parcours habituel.
+  const nePlus = decisionNePlusContacter(texte, { dernierBot: dernierMessageDuBot(etat?.messages) })
+  if (nePlus.type === 'doute') {
+    await repondre(QUESTION_DOUTE_NE_PLUS_CONTACTER)
+    return
+  }
+  if (nePlus.type === 'poser' || nePlus.type === 'poser_et_abonnement') {
+    const p = await poserNePlusContacter(u.id, 'non_rattache')
+    await repondre(p === 'panne' ? TEXTE_NE_PLUS_CONTACTER_PANNE : TEXTE_NE_PLUS_CONTACTER_NOTE, p === 'panne' ? clavierEquipe() : undefined)
+    if (nePlus.type === 'poser') return
   }
   // (15/10) Un choix de compte encore ouvert (« Utiliser ce compte-ci » ou
   // « Ce n'est pas moi ») : il lui est redonne, plutot que la demande d'email.

@@ -1,5 +1,24 @@
 # ETAT du journal d etudes
 
+## BOT LIVE CLUB : NE PLUS CONTACTER (27/11/2026, demande de Brice ; branche bot-ne-plus-contacter depuis origin/master f127b78, commitee NON poussee ; aucune migration)
+
+- La personne ECRIT qu'elle ne veut plus de nos messages : le bot le reconnait, pose le marqueur et confirme. Jamais
+  propose, aucun bouton. Regle pure : src/lib/liveclub/ne-plus-contacter-pur.ts (decisionNePlusContacter), serveur :
+  ne-plus-contacter.ts (poserNePlusContacter, nePlusContacterPose). Verif : scripts/verifier-ne-plus-contacter.mjs.
+- Marqueur = ligne de cockpit_liveclub_gestes geste 'rappel', regle 'ne_plus_contacter', resultat 'fait', acteur
+  'bot:membre', details { origine: agent | non_rattache, demande_le } : EXACTEMENT ce que lit le lanceur bf-anciens
+  (lireEtatAncien). Pose une fois (where not exists), ligne au fil Support.
+- Compte rattache ou acces offert : outil ne_plus_contacter de l'agent (sans parametre), le serveur relit le message.
+  Compte non rattache : la meme decision pure dans traiterNonRattache, apres l'email et le code.
+- « me desabonner », « me desinscrire », « stop » seul : UNE question (« Tu veux arreter ton abonnement, ou ne plus
+  recevoir nos messages ? ») ; « mon abonnement » = parcours habituel (proposer_arret ; non rattache : demande d'email) ;
+  « les deux » = marqueur puis proposer_arret. Une duree (vacances, avant lundi) : rien. Un autre service nomme : rien
+  (la question si l'agent y a vu une demande).
+- Lu par : les conseils d'accueil du passage (tipDuMembre, compteur tips.ne_plus_contacter) et le lanceur bf-anciens.
+  Pas lu par les messages lies a l'abonnement (prelevement J-3, pause, sortie, broker, exemption), ni les reponses du
+  bot, l'entree dans le groupe, l'indicateur ou une reprise.
+- Prompt de l'agent change (consigne + outil) : rejouer scripts/eval-fuites.mjs avant la mise en ligne.
+
 ## BONUS MEMBRES DU LIVE CLUB : LE CORRECTIF (27/11/2026, Brice « Vas-y fait tout le correctif » ; branche bonus-membres depuis origin/master 2b0c834, commitee NON poussee ; aucune migration)
 
 - Audit du 27/11 (side-session-notes, bonus-membres-audit-rapport.md), trous 1 a 4. Le lien a 267 EUR n'est pas touche.

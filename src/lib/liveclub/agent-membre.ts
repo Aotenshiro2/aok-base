@@ -72,6 +72,12 @@ import {
   NOM_OUTIL_NOTER_LIMITE, noterConsultation, noterHumain, noterLimite, resultatNoterLimite, suiviLimites, type SuiviLimites,
 } from '@/lib/besoins/signaux-pur'
 import { appliquerLimitesTelegram } from '@/lib/besoins/signaux'
+// (27/11) Ne plus recevoir nos messages : la decision pure, le marqueur au journal du bot.
+import {
+  NOM_OUTIL_NE_PLUS_CONTACTER, QUESTION_DOUTE_NE_PLUS_CONTACTER, RESULTAT_OUTIL_LES_DEUX, TEXTE_NE_PLUS_CONTACTER_NOTE,
+  TEXTE_NE_PLUS_CONTACTER_PANNE, decisionNePlusContacter, dernierMessageDuBot, resultatOutilSansMarqueur,
+} from './ne-plus-contacter-pur'
+import { poserNePlusContacter } from './ne-plus-contacter'
 
 export { MODELE_LIVECLUB }
 
@@ -216,7 +222,12 @@ export async function repondreAuMembre(
 ): Promise<ReponseAgentMembre> {
   const besoins: BesoinPropose[] = []
   const suivi = suiviLimites()
-  const reponse = await boucleAgentMembre(telegramId, historique, question, o, besoins, suivi)
+  const nePlus = { note: false }
+  const brute = await boucleAgentMembre(telegramId, historique, question, o, besoins, suivi, nePlus)
+  // (27/11) « Les deux » : marqueur pose pendant la boucle, puis l'arret habituel ; la phrase du serveur en tete.
+  const reponse = nePlus.note && brute.texte && !brute.texte.includes(TEXTE_NE_PLUS_CONTACTER_NOTE)
+    ? { ...brute, texte: `${TEXTE_NE_PLUS_CONTACTER_NOTE}\n\n${brute.texte}` }
+    : brute
   const texteFil = nettoyerPourSupport(question.trim()).slice(0, 4000)
   await appliquerLimitesTelegram({ telegramId, texteFil, texteMembre: question, reponse: reponse.texte, suivi })
   if (!besoins.length) return reponse
@@ -236,6 +247,7 @@ async function boucleAgentMembre(
   o: { contexte?: string },
   besoins: BesoinPropose[],
   suivi: SuiviLimites,
+  nePlus: { note: boolean },
 ): Promise<ReponseAgentMembre> {
   const client = clientAgent()
   // (29/10) SECURITE DES BOTS : le message du membre (niveau 'injection' :
@@ -301,6 +313,11 @@ async function boucleAgentMembre(
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(REFUS_PRUDENCE_MEMBRE) })
         continue
       }
+      // (27/11) Ni le marqueur « ne plus contacter » : rien n'est pose sur un message suspect.
+      if (prudence && bloc.name === NOM_OUTIL_NE_PLUS_CONTACTER) {
+        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(REFUS_PRUDENCE_MEMBRE) })
+        continue
+      }
       // (05/11) Ni l'indicateur d'Alex (il menerait a un message a un tiers).
       if (prudence && bloc.name === NOM_OUTIL_INDICATEUR) {
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(REFUS_PRUDENCE_MEMBRE) })
@@ -328,6 +345,26 @@ async function boucleAgentMembre(
         const r = resultatNoterBesoin(bloc.input)
         if (r.besoin) besoins.push(r.besoin)
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: r.contenu, ...(r.erreur ? { is_error: true } : {}) })
+        continue
+      }
+
+      // (27/11, Brice) NE PLUS CONTACTER : l'agent a reconnu une demande ecrite ;
+      // le serveur relit le message (decision pure), et c'est lui qui repond :
+      // la confirmation (marqueur pose), la question de doute (rien de pose),
+      // ou rien (une duree, un autre service : l'agent repond normalement).
+      // Jamais de bouton ; l'acces et les reponses du bot ne changent pas.
+      if (bloc.name === NOM_OUTIL_NE_PLUS_CONTACTER) {
+        const d = decisionNePlusContacter(question, { dernierBot: dernierMessageDuBot(historique), appelModele: true })
+        if (d.type === 'doute') return { texte: QUESTION_DOUTE_NE_PLUS_CONTACTER, ...drapeau() }
+        if (d.type === 'poser' || d.type === 'poser_et_abonnement') {
+          const p = await poserNePlusContacter(telegramId, 'agent')
+          if (p === 'panne') return { texte: TEXTE_NE_PLUS_CONTACTER_PANNE, repli: true, ...drapeau() }
+          if (d.type === 'poser') return { texte: TEXTE_NE_PLUS_CONTACTER_NOTE, ...drapeau() }
+          nePlus.note = true
+          resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(RESULTAT_OUTIL_LES_DEUX) })
+          continue
+        }
+        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(resultatOutilSansMarqueur(d)) })
         continue
       }
 

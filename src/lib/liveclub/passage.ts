@@ -139,6 +139,8 @@ import { lireHistorique } from './conversations'
 import {
   TIPS_ACCUEIL_DEPUIS, TIPS_FENETRE_JOURS, boutonsTip, dejaParle, estCleTip, texteTip, tipsDus,
 } from './tips-accueil-pur'
+// (27/11) Ne plus recevoir nos messages : le marqueur pose par le bot (ne-plus-contacter.ts).
+import { nePlusContacterPose } from './ne-plus-contacter'
 import {
   emailRappelPause, emailDebutPauseSansReprise, emailRetour, emailRappelFinBroker, emailFinBroker,
   emailSortieDesabonne, emailRappelPrelevement, emailSortieImpaye, emailReouverture, emailFinFenetre, emailBienvenue,
@@ -270,6 +272,8 @@ export type SynthesePassage = {
   tips: {
     envoyes: number; sautes: number; decales: number; absents: number; sans_droit: number; equipe: number
     deja_faits: number; inconnus: number; echecs: number; coupe: boolean
+    /** (27/11) A ecrit ne plus vouloir nos messages (ne-plus-contacter.ts) : aucun conseil. */
+    ne_plus_contacter: number
   }
   purge: { conversations: number }
   /**
@@ -3408,6 +3412,11 @@ async function tipDuMembre(ctx: Contexte, tid: number, entreLe: string, aujourdh
     if (relance) s.decales++
     return
   }
+  // (27/11, Brice) Il a ecrit ne plus vouloir nos messages : aucun conseil
+  // (message a notre initiative). Marqueur illisible : rien non plus aujourd'hui.
+  const nePlus = await nePlusContacterPose(tid)
+  if (nePlus === null) { s.inconnus++; return }
+  if (nePlus) { s.ne_plus_contacter++; return }
   // L'etat relu juste avant (grille de Brice) : dans le groupe, droit ouvert,
   // et l'equipe ni attendue ni en train de lui repondre.
   const p = await presence(tid)
@@ -3602,7 +3611,7 @@ function nouveauContexte(maintenant: Date): Contexte {
         sorties: 0, simulees: 0, messages: 0, alertes: 0, retours: 0, deja_revenus: 0,
         absents: 0, gardes: 0, sans_compte: 0, inconnus: 0, echecs: 0, coupe: false,
       },
-      tips: { envoyes: 0, sautes: 0, decales: 0, absents: 0, sans_droit: 0, equipe: 0, deja_faits: 0, inconnus: 0, echecs: 0, coupe: false },
+      tips: { envoyes: 0, sautes: 0, decales: 0, absents: 0, sans_droit: 0, equipe: 0, deja_faits: 0, inconnus: 0, echecs: 0, coupe: false, ne_plus_contacter: 0 },
       purge: { conversations: 0 },
       pseudos: { relus: 0, corriges: 0, inconnus: 0, echecs: 0 },
       indicateur: { etat: 'pas_lance', transmises: 0, departs: 0, prevenus: 0, verifies: 0, inconnus: 0, echecs: 0 },

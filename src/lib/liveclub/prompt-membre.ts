@@ -99,6 +99,20 @@ import { OUTIL_TROUVER_COURS } from '../trouver-cours-pur'
 import { CONSIGNE_NOTER_BESOIN, OUTIL_NOTER_BESOIN } from '../besoins/pur'
 // (06/11, apres-midi) Les limites des agents : noter_limite (module pur, commun au chat support ; tri par le serveur).
 import { CONSIGNE_NOTER_LIMITE, OUTIL_NOTER_LIMITE } from '../besoins/signaux-pur'
+// (27/11) Ne plus recevoir nos messages : la consigne et l'outil (module pur).
+import { CONSIGNE_NE_PLUS_CONTACTER, NOM_OUTIL_NE_PLUS_CONTACTER } from './ne-plus-contacter-pur'
+
+/**
+ * (27/11, Brice) NE PLUS CONTACTER : la personne ECRIT qu'elle ne veut plus de
+ * nos messages. Sans parametre : le serveur relit son message (decision pure,
+ * question de doute pour « me desabonner »), pose le marqueur et repond lui-meme.
+ * Jamais propose par l'agent, aucun bouton.
+ */
+export const OUTIL_NE_PLUS_CONTACTER: Anthropic.Tool = {
+  name: NOM_OUTIL_NE_PLUS_CONTACTER,
+  description: "Le membre écrit lui-même qu'il ne veut plus être contacté ou ne plus recevoir nos messages (promos, relances), ou écrit « me désabonner », « me désinscrire » ou « stop » sans préciser. Sans paramètre. Appelle-le sans écrire de texte : le serveur relit son message, lui demande s'il parle de son abonnement quand ce n'est pas clair, et lui répond. Ne change rien à son accès. Jamais de toi-même.",
+  input_schema: { type: 'object', properties: {}, additionalProperties: false },
+}
 
 /** Modele surchargeable par env sans redeployer de code. */
 export const MODELE_LIVECLUB = process.env.AI_MODEL_LIVECLUB?.trim() || 'claude-haiku-4-5-20251001'
@@ -155,6 +169,7 @@ Ce que tu ne fais PAS :
 - Tu n'es pas un bot de mentorat : tu n'analyses pas de chart et tu n'expliques pas de concept de trading. Si le membre a besoin d'apprendre une notion ou cherche un cours, tu l'orientes vers le bon cours ou la bonne masterclass (trouver_cours) : le lien et l'accès, sans expliquer la notion. Pour la question elle-même, le groupe et les lives.
 - Tu n'inventes rien. Si tu ne sais pas répondre sur son compte, le Live Club ou un produit, dis-le et appelle demander_un_humain. Sur un produit, tu ne dis que ce que disent ses fiches (connaissances_produits) ou les informations publiques plus bas : pas de fonction, de prix, de date ni de nouveauté devinés.
 - Une demande sur l'effacement de ses données (« supprime mes données », « effacez mes messages », « je veux qu'on m'oublie », « supprimez mon compte », « RGPD », « droit à l'oubli », ou ce que vous gardez sur lui et s'il peut le faire effacer) : tu ne supprimes rien, tu n'as aucun outil pour ça, et tu ne décris ni ce qui pourrait être effacé, ni des options, ni des niveaux. Tu appelles demander_un_humain, puis tu réponds seulement, mot pour mot : « ${TEXTE_DEMANDE_EFFACEMENT} » Pas de pause ni d'arrêt proposé dans cette réponse : l'équipe voit tout avec lui. Tu ne proposes jamais de toi-même d'effacer quoi que ce soit, et tu n'en parles pas s'il ne te le demande pas.
+${CONSIGNE_NE_PLUS_CONTACTER}
 
 Pour s'abonner ou se réabonner, donne les deux adresses : ${texteAbonnement()}
 
@@ -245,6 +260,8 @@ export const OUTILS_MEMBRE: Anthropic.Tool[] = [
   OUTIL_NOTER_BESOIN,
   // (06/11, apres-midi) Les limites de l'agent (src/lib/besoins/signaux-pur.ts) : triees par le serveur.
   OUTIL_NOTER_LIMITE,
+  // (27/11) Ne plus recevoir nos messages (ne-plus-contacter-pur.ts) : le serveur decide, pose et repond.
+  OUTIL_NE_PLUS_CONTACTER,
   {
     name: 'demander_un_humain',
     description: "Transmet à l'équipe du Live Club : le membre demande à parler à quelqu'un, un remboursement ou une remise, fait une réclamation, a un cas particulier, ou tu ne sais pas répondre à une question sur son compte ou le Live Club. Jamais pour une confidence ou une humeur. L'équipe répondra dans cette conversation Telegram. Sans paramètre.",
