@@ -147,8 +147,11 @@ await bloc('ETM : chemin du Carnet inchange, prix membre sans blocage', () => {
 await bloc('cablage', () => {
   const ent = lire('src/lib/entitlements.ts')
   const fonction = ent.slice(ent.indexOf('export async function checkMentoratAccess'))
-  // Le direct est lu en dernier (apres carnet-premium) : il ne change la raison de personne.
-  assert.ok(fonction.indexOf("reason: 'carnet-premium'") < fonction.indexOf('liveClubEnDirect(userId)'))
+  // Le direct est lu apres tous les droits de la base. Un payeur du Carnet qui est aussi membre du Live Club garde la
+  // raison 'liveclub' (elle ouvre Pilotage Premium) : le direct est relu dans le bloc carnet-premium, avant son return.
+  const blocCarnet = fonction.slice(fonction.indexOf('if (await hasCarnetPremium(userId, email))'))
+  assert.ok(blocCarnet.indexOf("(await liveClubEnDirect(userId)) === 'oui'") < blocCarnet.indexOf("reason: 'carnet-premium'"))
+  assert.ok(fonction.indexOf("reason: 'duo'") < fonction.indexOf('liveClubEnDirect(userId)'))
   assert.match(fonction, /premiumParLiveClub\(\{ vue: m\?\.abonnement_en_cours, direct: await liveClubEnDirect\(userId\) \}\)\) \{\n\s+return \{ entitled: true, reason: 'liveclub', email \}/)
   // La vue reste lue.
   assert.match(fonction, /if \(m\.abonnement_en_cours\) return \{ entitled: true, reason: 'liveclub', email \}/)

@@ -364,6 +364,9 @@ export async function checkMentoratAccess(userId: string): Promise<MentoratAcces
   // l'accès s'ouvre dans la minute qui suit le paiement). Le compte d'abord
   // (client_reference_id du lien de paiement), l'email en repli.
   if (await hasCarnetPremium(userId, email)) {
+    // (27/11/2026) Un membre du Live Club qui paie aussi le Carnet garde la
+    // raison 'liveclub' : elle ouvre Pilotage Premium, 'carnet-premium' non.
+    if ((await liveClubEnDirect(userId)) === 'oui') return { entitled: true, reason: 'liveclub', email }
     return { entitled: true, reason: 'carnet-premium', email }
   }
 
