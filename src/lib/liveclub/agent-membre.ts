@@ -497,6 +497,12 @@ async function boucleAgentMembre(
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify({ erreur: 'Outil inconnu.' }), is_error: true })
         continue
       }
+      // (27/11, eval NP02) « Je veux me desabonner » seul : Haiku y voit un arret.
+      // Le serveur pose d'abord la question de doute (arreter l'abonnement ou nos
+      // messages) ; sa reponse « mon abonnement » ramene ici, sans question.
+      if (type === 'arret' && decisionNePlusContacter(question, { dernierBot: dernierMessageDuBot(historique) }).type === 'doute') {
+        return { texte: QUESTION_DOUTE_NE_PLUS_CONTACTER, ...drapeau() }
+      }
       // Le nombre de mois vient du modele : il est revalide par preparerAction
       // (entier 1 a 6), comme tout ce qui sort d'un texte.
       const nbMois = type === 'pause' ? Number((bloc.input as { nb_mois?: unknown })?.nb_mois) : undefined

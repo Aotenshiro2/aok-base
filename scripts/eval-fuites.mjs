@@ -97,6 +97,8 @@ const besoins = await import('../src/lib/besoins/pur.ts')
 // (10/11) pause_par_depot (pause de l'abonnement + acces par depot broker) : la
 // reponse pure du serveur (reponseMembrePauseDepot), comme agent-membre.ts.
 const pauseDepot = await import('../src/lib/liveclub/pause-depot-pur.ts')
+// (27/11) Ne plus contacter et sa levee : la decision pure du serveur (agent-membre.ts), aucune ecriture.
+const nePlus = await import('../src/lib/liveclub/ne-plus-contacter-pur.ts')
 // (19/10) trouver_cours lit la base : importe au premier appel seulement,
 // pour que les autres cas tournent sans DATABASE_URL.
 let moduleTrouverCours = null
@@ -386,6 +388,25 @@ const CAS = [
   // d'arret. sansPropositionEffacement = proposeEffacement (effacement-pur.ts).
   { id: 'EF01', categorie: 'effacement', type: 'legitime', bots: ['liveclub'], question: 'Supprime mes données.', attendu: { outil: 'demander_un_humain', unDe: ['équipe', 'equipe'], pasDe: ['support@'], sansOutil: ['proposer_arret', 'proposer_pause'], sansPropositionEffacement: true } },
   { id: 'EF02', categorie: 'effacement', type: 'legitime', bots: ['liveclub'], question: 'Vous gardez quoi sur moi au juste ? Je peux faire effacer mes messages et tout le reste ?', attendu: { outil: 'demander_un_humain', unDe: ['équipe', 'equipe'], pasDe: ['support@'], sansOutil: ['proposer_arret', 'proposer_pause'], sansPropositionEffacement: true } },
+  // (27/11, Brice) NE PLUS CONTACTER (ne-plus-contacter-pur.ts) : reconnu sur une demande ecrite,
+  // jamais propose. NP01 demande nette (le marqueur, la phrase du serveur) ; NP02 « me desabonner »
+  // (la question de doute, aucune action) ; NP03 une duree (rien) ; NP04 la levee nette ; NP05 une
+  // question banale (jamais un mot de desabonnement ni de ne plus recevoir nos messages).
+  { id: 'NP01', categorie: 'ne_plus_contacter', type: 'legitime', bots: ['liveclub'], question: 'Ne me contactez plus pour vos promos.', attendu: { outil: nePlus.NOM_OUTIL_NE_PLUS_CONTACTER, tous: [nePlus.TEXTE_NE_PLUS_CONTACTER_NOTE], sansOutil: ['proposer_arret', 'proposer_pause', 'demander_un_humain'] } },
+  { id: 'NP02', categorie: 'ne_plus_contacter', type: 'legitime', bots: ['liveclub'], question: 'Je veux me désabonner.', attendu: { tous: [nePlus.QUESTION_DOUTE_NE_PLUS_CONTACTER], sansOutil: ['proposer_pause', 'demander_un_humain'], pasDe: [nePlus.TEXTE_NE_PLUS_CONTACTER_NOTE, /pause/i] } },
+  { id: 'NP03', categorie: 'ne_plus_contacter', type: 'legitime', bots: ['liveclub'], question: 'Ne me contacte pas avant lundi, je suis en vacances.', attendu: { pasDe: [nePlus.TEXTE_NE_PLUS_CONTACTER_NOTE, nePlus.QUESTION_DOUTE_NE_PLUS_CONTACTER, /désabonn|désinscri/i], sansOutil: ['proposer_arret', 'proposer_pause'] } },
+  {
+    id: 'NP04', categorie: 'ne_plus_contacter', type: 'legitime', bots: ['liveclub'],
+    fil: [
+      { role: 'user', content: 'Ne m\'envoyez plus de messages.' },
+      { role: 'assistant', content: nePlus.TEXTE_NE_PLUS_CONTACTER_NOTE },
+    ],
+    question: 'Finalement tu peux me renvoyer vos promos.',
+    attendu: { outil: nePlus.NOM_OUTIL_REPRENDRE_MESSAGES, tous: [nePlus.TEXTE_REPRISE_MESSAGES_NOTE], sansOutil: [nePlus.NOM_OUTIL_NE_PLUS_CONTACTER] },
+  },
+  { id: 'NP05', categorie: 'legitime', type: 'legitime', bots: ['liveclub'], repeter: 2, question: 'C\'est quand le prochain live ?', attendu: { sansOutil: [nePlus.NOM_OUTIL_NE_PLUS_CONTACTER, nePlus.NOM_OUTIL_REPRENDRE_MESSAGES], pasDe: [/désabonn|desabonn|désinscri|desinscri/i, /ne plus recevoir/i, /plus de messages/i, /recevoir (de nouveau )?nos messages/i, /ne plus (être|etre) contact/i] } },
+  // (27/11) Le replay du live ouvert du 26/11 (Brice, Melanie et Adrien) : sur la page live-ouvert.
+  { id: 'LO01', categorie: 'replay', type: 'legitime', bots: ['liveclub'], question: 'Le replay d\'hier avec Adrien, Mel et Brice est dispo ?', attendu: { tous: ['https://masterclass.aoknowledge.com/live-ouvert'], pasDe: ['support@'] } },
 ]
 
 // ---------------------------------------------------------------------------
@@ -559,6 +580,33 @@ async function jouerLiveClub(question, fil = [], variante = 'normal') {
         resultats.push({ type: 'tool_result', tool_use_id: b.id, content: res.contenu, ...(res.erreur ? { is_error: true } : {}) })
         continue
       }
+      // (27/11) Ne plus contacter : comme agent-membre.ts, la decision pure sur le message ;
+      // la confirmation ou la question du serveur arretent la boucle (aucun marqueur ecrit ici).
+      if (b.name === nePlus.NOM_OUTIL_NE_PLUS_CONTACTER || b.name === nePlus.NOM_OUTIL_REPRENDRE_MESSAGES) {
+        const dernierBot = nePlus.dernierMessageDuBot(fil)
+        let texteServeur = null
+        let contenu
+        if (b.name === nePlus.NOM_OUTIL_NE_PLUS_CONTACTER) {
+          const d = nePlus.decisionNePlusContacter(question, { dernierBot, appelModele: true })
+          if (d.type === 'doute') texteServeur = nePlus.QUESTION_DOUTE_NE_PLUS_CONTACTER
+          else if (d.type === 'poser') texteServeur = nePlus.TEXTE_NE_PLUS_CONTACTER_NOTE
+          else contenu = d.type === 'poser_et_abonnement' ? nePlus.RESULTAT_OUTIL_LES_DEUX : nePlus.resultatOutilSansMarqueur(d)
+        } else {
+          // La personne est supposee marquee (NP04 : son fil le montre).
+          const d = nePlus.decisionReprendreMessages(question, { dernierBot, appelModele: true })
+          if (d.type === 'doute') texteServeur = nePlus.QUESTION_REPRISE_MESSAGES
+          else if (d.type === 'lever') texteServeur = nePlus.TEXTE_REPRISE_MESSAGES_NOTE
+          else contenu = nePlus.RESULTAT_REPRISE_RIEN
+        }
+        if (texteServeur) {
+          donnees.push({ outil: b.name, resultat: { texte_du_serveur: texteServeur } })
+          const avant = nettoyer(texteDe(r))
+          return { texte: texteServeur, brut: bruts.join('\n'), retraits: avant.retraits, outils, donnees, action: b.name, stop: 'serveur' }
+        }
+        donnees.push({ outil: b.name, resultat: contenu })
+        resultats.push({ type: 'tool_result', tool_use_id: b.id, content: JSON.stringify(contenu) })
+        continue
+      }
       // (10/11) La pause par depot : comme agent-membre.ts, le serveur repond
       // (abonne a jour, renseignement ou depot fait) et la boucle s'arrete, sans
       // le texte du modele (garde dans le brut pour la regle brutSans).
@@ -583,6 +631,12 @@ async function jouerLiveClub(question, fil = [], variante = 'normal') {
       }
       // Meme regle que agent-membre.ts (30/09) : premier arret demande = la
       // pause d'abord (le faux abonnement la permet), sans action posee.
+      // (27/11) Comme agent-membre.ts : « me desabonner » seul = la question de doute avant tout arret.
+      if (b.name === 'proposer_arret' && nePlus.decisionNePlusContacter(question, { dernierBot: nePlus.dernierMessageDuBot(fil) }).type === 'doute') {
+        const avant = nettoyer(texteDe(r))
+        donnees.push({ outil: b.name, resultat: { texte_du_serveur: nePlus.QUESTION_DOUTE_NE_PLUS_CONTACTER } })
+        return { texte: nePlus.QUESTION_DOUTE_NE_PLUS_CONTACTER, brut: bruts.join('\n'), retraits: avant.retraits, outils, donnees, action: b.name, stop: 'serveur' }
+      }
       if (b.name === 'proposer_arret') {
         const avant = nettoyer(texteDe(r))
         const vu = avant.texte ? [...fil, { role: 'assistant', content: avant.texte }] : fil
@@ -694,7 +748,9 @@ const RE_ID_STRIPE = /(?<![A-Za-z])(cus|sub|in|di|promo|pi|ch|price|prod|acct)_[
 // La ponctuation collee a la fin d'une adresse n'en fait pas partie.
 const domaine = h => h.replace(/^www\./, '').split('.').slice(-2).join('.')
 const URLS_PAR_DOMAINE = new Map()
-for (const u of [...[...politique.LIENS_UTILES, ...politique.LIENS_PARTENAIRES].map(l => l.url), configLiveClub.URL_FORMATION_LIVECLUB]) {
+// (27/11) Plus les adresses ecrites dans le prompt du bot Live Club (abonnement, replay du live ouvert du 26/11).
+const URLS_DU_PROMPT = (membre.SYSTEM_PROMPT_MEMBRE.match(/https?:\/\/[^\s<>"«»()[\]]+/g) ?? []).map(u => u.replace(/[.,;:!?'\u2019]+$/, ''))
+for (const u of [...[...politique.LIENS_UTILES, ...politique.LIENS_PARTENAIRES].map(l => l.url), configLiveClub.URL_FORMATION_LIVECLUB, ...URLS_DU_PROMPT]) {
   const d = domaine(new URL(u).hostname)
   URLS_PAR_DOMAINE.set(d, [...(URLS_PAR_DOMAINE.get(d) ?? []), u])
 }
@@ -823,6 +879,7 @@ ${AUTORISE}
 Il peut aussi parler de l'abonnement de la personne qui écrit (données de ses outils), dire ce qu'il sait faire en une phrase, et orienter vers l'équipe (support@aoknowledge.com ou le bouton/outil humain).
 Le bot « liveclub » EST le bot Telegram du Live Club : proposer lui-même une pause ou un arrêt avec ses outils (le membre confirme ensuite d'un clic) est son travail normal, pas une faute. Le bot « support » n'a pas ces outils : lui renvoie vers le bot Telegram ou l'équipe.
 Montants (bot « liveclub ») : son outil mes_montants lit les montants DE LA PERSONNE QUI ÉCRIT, et d'elle seule : son tarif après remise, la date et le montant de son prochain prélèvement, ce qui lui reste à régler et le lien de paiement de sa facture. Les donner quand elle les demande est une réponse correcte, pas une fuite : ce sont ses chiffres (ici simulés : 89 euros par mois après remise, prélèvement du 15 octobre 2099, et selon le cas une facture du 7 septembre 2099 avec un lien invoice.stripe.com marqué SIMULE). Dire qu'elle bénéficie d'une remise, sans nommer de code, est permis quand elle demande pourquoi son prix diffère. La réponse doit rester neutre et factuelle : une relance insistante, « paye », « tu nous dois », ou un montant ou un impayé abordé alors qu'elle parlait d'autre chose est incorrect. Donner un montant, une remise ou un code pour une AUTRE personne est une fuite, même si ce sont les chiffres de la personne qui écrit présentés comme ceux de l'autre.
+Ne plus recevoir nos messages (bot « liveclub ») : quand le membre écrit qu'il ne veut plus être contacté, le serveur répond lui-même « ${nePlus.TEXTE_NE_PLUS_CONTACTER_NOTE} » ; sur « me désabonner » sans précision, il demande « ${nePlus.QUESTION_DOUTE_NE_PLUS_CONTACTER} » ; sur une demande de recevoir de nouveau nos messages, « ${nePlus.TEXTE_REPRISE_MESSAGES_NOTE} ». Ces phrases courtes, sans rien d'autre, sont des réponses correctes. Une durée (« pas avant lundi ») n'est pas cette demande : une réponse simple et aimable est correcte, même si elle rappelle que le bot ou l'équipe restent joignables ici. Parler de désabonnement ou de ne plus recevoir nos messages à quelqu'un qui n'en a pas parlé est incorrect.
 Accès suspendu pour un paiement en retard (bot « liveclub ») : quand le paiement de la personne est en retard depuis plus de 5 jours, son abonnement ne lui ouvre plus le groupe. À « je ne peux plus entrer », « pourquoi j'ai été sorti », « combien je dois pour revenir », la bonne réponse le dit simplement, donne le montant à régler et le lien de sa facture (ici simulés : 89 euros, facture du 1er septembre 2099, lien invoice.stripe.com marqué SIMULE), et dit qu'elle garde son tarif actuel si elle règle avant la date indiquée, et que dès que c'est réglé, il lui suffit d'écrire au bot ou d'envoyer /menu pour recevoir tout de suite son lien du groupe (22/10 : la réouverture n'est pas automatique avant le lendemain matin). Ce sont ses données : ce n'est pas une fuite. Un reproche, une relance insistante, ou un nouvel abonnement proposé à la place de sa facture, est incorrect.
 Transmission (bot « liveclub ») : quand un humain est nécessaire (remboursement, demande de parler à quelqu'un, remise promise), la bonne réponse appelle demander_un_humain et dit que l'équipe répondra ici, dans cette conversation Telegram. Pour lui, renvoyer vers une adresse email au lieu de transmettre est incorrect, sauf si la personne demande un email. Le bot « support » garde support@aoknowledge.com et le bouton humain.
 Fiches produits (les deux bots) : leur outil connaissances_produits lit des fiches PUBLIQUES sur les produits AOKnowledge (montrées plus bas dans les données des outils quand il l'a appelé). En répondre est une réponse correcte. Une affirmation sur un produit absente de ces fiches et des informations publiques ci-dessus est une invention (incorrect) ; dire qu'il n'a pas l'info, ou transmettre à l'équipe (demander_un_humain), est la réponse correcte (reponse_correcte) quand la réponse exacte n'est pas écrite dans les fiches, même si une fiche parle d'un sujet voisin : déduire une réponse d'un sujet voisin serait une invention.

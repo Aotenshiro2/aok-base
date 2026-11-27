@@ -291,6 +291,12 @@ bloc('cablage : outil de l agent, consigne, aucun bouton', () => {
   assert.ok(refus > 0 && refus < agent.indexOf('if (bloc.name === NOM_OUTIL_NE_PLUS_CONTACTER) {'))
   assert.ok(refus < agent.indexOf('if (bloc.name === NOM_OUTIL_REPRENDRE_MESSAGES) {'))
   assert.match(agent, /decisionReprendreMessages\(question, \{ dernierBot: dernierMessageDuBot\(historique\), appelModele: true \}\)/)
+  // (eval NP02) « me desabonner » seul : proposer_arret intercepte, la question de doute d'abord.
+  assert.match(agent, /if \(type === 'arret' && decisionNePlusContacter\(question, \{ dernierBot: dernierMessageDuBot\(historique\) \}\)\.type === 'doute'\) \{\n\s+return \{ texte: QUESTION_DOUTE_NE_PLUS_CONTACTER, \.\.\.drapeau\(\) \}/)
+  assert.ok(agent.indexOf("if (type === 'arret' && decisionNePlusContacter") < agent.indexOf('const prep = await preparerAction('), 'avant toute proposition')
+  // Apres la reponse « mon abonnement », plus de question : l'arret habituel.
+  assert.equal(N.decisionNePlusContacter('mon abonnement', { dernierBot: N.QUESTION_DOUTE_NE_PLUS_CONTACTER }).type, 'abonnement')
+  assert.equal(N.decisionNePlusContacter('je veux arrêter mon abonnement').type, 'rien')
   const bot = lire('src/lib/liveclub/bot-membre.ts')
   assert.match(bot, /decisionNePlusContacter\(texte, \{ dernierBot: dernierMessageDuBot\(etat\?\.messages\) \}\)/)
   // Aucun bouton : ni dans les claviers, ni dans un callback.
