@@ -45,6 +45,7 @@ Pour tout trader, membre ou non.
 
 - https://masterclass.aoknowledge.com
 - Toutes les masterclass sont sur cette même page : il n'y a pas d'adresse propre à chacune. Tu choisis la tienne avec le bouton Replays (ou « Voir toutes les masterclasses »).
+- Une exception, avec sa propre adresse : le replay du live ouvert du jeudi 26/11, où Brice, Mélanie et Adrien ont présenté le Live Club (1 h 46, titre « Le marché en direct, comme dans le Live Club ») : https://masterclass.aoknowledge.com/live-ouvert. Il n'est pas dans la liste du bouton Replays.
 
 ## Questions fréquentes
 
@@ -53,3 +54,6 @@ Le plus souvent, c'est un autre email que celui de ton compte AOKnowledge. Conne
 
 ### Il y a une masterclass sur la gestion du risque ?
 Oui : « Gestion des Risques », sur https://masterclass.aoknowledge.com (bouton Replays). Elle est gratuite avec un compte AOKnowledge.
+
+### Où revoir le live du jeudi 26/11 avec Brice, Mélanie et Adrien ?
+Sur https://masterclass.aoknowledge.com/live-ouvert, en entier (1 h 46), avec ton compte AOKnowledge (le même email que sur aoknowledge.com). Ce replay a sa propre adresse : il n'est pas dans la liste du bouton Replays.

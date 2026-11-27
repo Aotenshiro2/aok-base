@@ -2,9 +2,9 @@
 sujet: live-club
 titre: Le Live Club
 resume: L'abonnement de lives éducatifs animés par Mélanie et Brice, avec le groupe Telegram, les replays, les modules de formation et le Carnet Premium tant que l'abonnement est actif. 99 € par mois, sans engagement. Pas encore membre : le même accès peut être offert pour une durée par un dépôt chez notre broker partenaire.
-mots: live club, lives, abonnement, telegram, groupe, replays, académie, pause, arrêt, bot, prix, meltrade, melaniechart, horaires, heures, annonce, broker, dépôt, raisefx, lots, accès offert
+mots: live club, lives, abonnement, telegram, groupe, replays, académie, pause, arrêt, bot, prix, meltrade, melaniechart, horaires, heures, annonce, broker, dépôt, raisefx, lots, accès offert, live ouvert, présentation du live club, adrien, masterclass
 verifie: 2026-11-27
-sources: sites/Aoknowledgecom/v3/src/pages/LiveClubPage.tsx ; sites/Aoknowledgecom/v3/src/pages/LiveClubCGVPage.tsx ; apps/journal-d-etude/src/lib/liveclub/config.ts (URLS_ABONNEMENT, URL_PORTAIL_CARTE, URL_FORMATION_LIVECLUB) ; src/lib/politique-information.ts (LIENS_UTILES, RaiseFx) ; src/lib/liveclub/accueil-groupe.ts ; src/lib/liveclub/emails.ts (modeleAccesBroker, modeleRappelFinBroker, modeleFinBroker, modeleRelanceLots, modeleSuspensionLots) ; src/lib/liveclub/lots-pur.ts (DELAI_LOTS_JOURS, EXEMPLE_LOTS, TENUE_LOTS, departLots) ; src/lib/liveclub/prompt-membre.ts (consigneLots, outil pause_par_depot) ; src/lib/liveclub/pause-depot-pur.ts (texteOffrePauseDepot : la pause par dépôt des abonnés, une autre offre) ; réponse de l'équipe au fil support bdb0cde7 du 10/11/2026 (accès par dépôt RaiseFx) ; forfaits 3 et 6 mois : D:/6_Societe/Pilotage/Data-Performance/marketing/black-friday-2026/00-FAITS-20-11.md (faits validés du 20/11) ; changement de formule : src/lib/liveclub/changement-formule-pur.ts et D:/6_Societe/Pilotage/Data-Performance/prix/scripts/mel_forfait_arrete_mensuel.py (mensuel arrêté, jours reportés, même email)
+sources: sites/Aoknowledgecom/v3/src/pages/LiveClubPage.tsx ; sites/Aoknowledgecom/v3/src/pages/LiveClubCGVPage.tsx ; apps/journal-d-etude/src/lib/liveclub/config.ts (URLS_ABONNEMENT, URL_PORTAIL_CARTE, URL_FORMATION_LIVECLUB) ; src/lib/politique-information.ts (LIENS_UTILES, RaiseFx) ; src/lib/liveclub/accueil-groupe.ts ; src/lib/liveclub/emails.ts (modeleAccesBroker, modeleRappelFinBroker, modeleFinBroker, modeleRelanceLots, modeleSuspensionLots) ; src/lib/liveclub/lots-pur.ts (DELAI_LOTS_JOURS, EXEMPLE_LOTS, TENUE_LOTS, departLots) ; src/lib/liveclub/prompt-membre.ts (consigneLots, outil pause_par_depot) ; src/lib/liveclub/pause-depot-pur.ts (texteOffrePauseDepot : la pause par dépôt des abonnés, une autre offre) ; réponse de l'équipe au fil support bdb0cde7 du 10/11/2026 (accès par dépôt RaiseFx) ; forfaits 3 et 6 mois : D:/6_Societe/Pilotage/Data-Performance/marketing/black-friday-2026/00-FAITS-20-11.md (faits validés du 20/11) ; changement de formule : src/lib/liveclub/changement-formule-pur.ts et D:/6_Societe/Pilotage/Data-Performance/prix/scripts/mel_forfait_arrete_mensuel.py (mensuel arrêté, jours reportés, même email) ; replay du live ouvert du 26/11 : sites/Masterclass/src/data/masterclasses.ts (liveOuvert) et src/data/tunnel-live.ts (TUNNEL_CHEMIN /live-ouvert), signalement de Brice du 27/11 (le bot renvoyait au sujet Replay)
 ---
 
 ## Ce que c'est
@@ -12,6 +12,7 @@ sources: sites/Aoknowledgecom/v3/src/pages/LiveClubPage.tsx ; sites/Aoknowledgec
 Le Live Club, c'est l'entraînement sur le marché réel, animé par Mélanie et Brice.
 - Deux à trois lives éducatifs chaque semaine, sur le marché en temps réel ou autour d'un thème, avec un temps de questions à la fin.
 - Les replays : chaque live est rangé dans le Telegram du Live Club, dans le sujet Replay, à revoir quand tu veux.
+- Une exception : le live ouvert du jeudi 26/11, où Brice, Mélanie et Adrien ont présenté le Live Club (ce qu'il y a dedans, les offres, avec une analyse du marché en exemple). Il n'est pas dans le sujet Replay : il se revoit en entier (1 h 46) sur le site des masterclass, https://masterclass.aoknowledge.com/live-ouvert, sous le titre « Le marché en direct, comme dans le Live Club », avec un compte AOKnowledge gratuit (le même email que sur aoknowledge.com).
 - Les modules de l'Académie inclus : https://aoknowledge.com/academie (connecte-toi avec l'email de ton abonnement).
 - Le groupe Telegram du Live Club : l'entraide entre membres, les explications de charts, les projections hebdomadaires Nasdaq et S&P 500. Les messages épinglés du groupe expliquent comment il marche.
 - Le Carnet du Trader et Pilotage en Premium, tant que l'abonnement est actif, et le Journal d'Études.
@@ -52,7 +53,10 @@ Oui, c'est le même Live Club. melaniechart.com est le site de Mélanie, et « m
 Non, les horaires ne sont pas fixes : le jour et l'heure changent d'une semaine à l'autre. Chaque live est annoncé à l'avance dans le Telegram du Live Club, dans le sujet Annonce, et son replay est rangé ensuite dans le sujet Replay.
 
 ### Les replays, je les trouve où ?
-Dans le Telegram du Live Club, dans le sujet Replay.
+Dans le Telegram du Live Club, dans le sujet Replay. Seule exception : le live ouvert du jeudi 26/11 avec Brice, Mélanie et Adrien, qui est sur https://masterclass.aoknowledge.com/live-ouvert.
+
+### Le replay du live du jeudi 26/11 avec Brice, Mélanie et Adrien est disponible ?
+Oui, en entier (1 h 46) : https://masterclass.aoknowledge.com/live-ouvert. Tu te connectes avec ton compte AOKnowledge, le même email que sur aoknowledge.com. Il n'est pas dans le sujet Replay du groupe : c'était un live ouvert à tous, où Brice, Mélanie et Adrien présentaient le Live Club.
 
 ### Edgyx est compris dans l'abonnement ?
 Non, c'est un abonnement à part. Le lien partenaire et le code LIVECLUB20 donnent 20 % de réduction sur Edgyx.
