@@ -4,7 +4,7 @@ import {
 } from '@/lib/academie/achat'
 import { offrePartie, retourSur, type OffreEnVente } from '@/lib/academie/achat-pur'
 import { prixDuCompte } from '@/lib/academie/prix-membre'
-import { expirationSession } from '@/lib/academie/prix-membre-pur'
+import { achatAVerifier, ERREUR_MEMBRE_INCONNU, expirationSession, TEXTE_MEMBRE_INCONNU } from '@/lib/academie/prix-membre-pur'
 import { compteDuJeton, corsAcademie, entetesAcademie, refusAcademie, tronquer } from '@/lib/academie/http'
 import { messageErreur } from '@/lib/liveclub/pur'
 
@@ -34,6 +34,8 @@ import { messageErreur } from '@/lib/liveclub/pur'
  *
  * 200 { ok, client_secret, session_id, cle_publique }
  * 400 'corps' | 403 'ferme' | 404 'module' (pas en vente) | 503 'config' (cle absente ou sans permission) | 502 'stripe'
+ * 503 'membre_inconnu' (27/11/2026) : un tarif membre vaut mais le statut du compte n'a pas pu etre verifie ;
+ *   { message, reessayer: true }, aucune session au prix plein.
  */
 
 export const dynamic = 'force-dynamic'
@@ -98,14 +100,22 @@ export async function POST(req: NextRequest) {
   let expiresAt: number | null = null
   if (userId && prixCourant !== null && prixCourant > 0) {
     const maintenant = new Date()
+    let calcul: Awaited<ReturnType<typeof prixDuCompte>> | null = null
     try {
-      const calcul = await prixDuCompte({ userId, offre: offre.offreSlug, prixCourantEur: prixCourant, quand: maintenant })
-      if (calcul.tarif) {
-        offre = { ...offre, stripePriceId: calcul.tarif.stripePriceId, tarif: calcul.tarif.slug }
-        expiresAt = expirationSession(calcul.tarif.fin, maintenant)
-      }
+      calcul = await prixDuCompte({ userId, offre: offre.offreSlug, prixCourantEur: prixCourant, quand: maintenant })
     } catch (err) {
       console.warn(`[academie/achat] tarif membre illisible, prix courant offre=${offre.offreSlug} : ${messageErreur(err)}`)
+    }
+    // (27/11/2026, correctif des bonus membres) Un tarif vaut et le statut du compte reste inconnu (Stripe lent ou
+    // illisible, apres le filet du cockpit) : pas de session au prix plein. 503 'membre_inconnu' et son message ; la
+    // page propose de reessayer (le cache Stripe ne garde pas un 'inconnu', l'essai suivant relit).
+    if (calcul && achatAVerifier(calcul)) {
+      console.warn(`[academie/achat] statut membre inconnu, achat suspendu offre=${offre.offreSlug} compte=${tronquer(userId)}`)
+      return refusAcademie(ERREUR_MEMBRE_INCONNU, 503, headers, { message: TEXTE_MEMBRE_INCONNU, reessayer: true })
+    }
+    if (calcul?.tarif) {
+      offre = { ...offre, stripePriceId: calcul.tarif.stripePriceId, tarif: calcul.tarif.slug }
+      expiresAt = expirationSession(calcul.tarif.fin, maintenant)
     }
   }
 

@@ -17,8 +17,9 @@ export async function lireTarifsMembres(): Promise<TarifMembre[]> {
  * Le prix d'une offre pour un compte, a un moment : prixMembre, avec les
  * tarifs de la base et les droits du compte (lus seulement si un tarif de
  * l'offre vaut a ce moment). Sans compte : le prix courant. droits : deja
- * lus par l'appelant (/moi), sinon droitsAcademie. Leve si la base ou les
- * droits sont illisibles : a l'appelant de choisir (prix courant ou refus).
+ * lus par l'appelant (/moi), sinon droitsAcademie. Leve si les tarifs sont
+ * illisibles : a l'appelant de choisir (prix courant ou refus). Droits
+ * illisibles (27/11/2026) : incertain, comme un Live Club inconnu.
  */
 export async function prixDuCompte(p: {
   userId: string | null
@@ -33,7 +34,15 @@ export async function prixDuCompte(p: {
   if (!p.userId) return courant
   const tarifs = (p.tarifs ?? (await lireTarifsMembres())).filter(t => t.cible === p.offre)
   if (!tarifPossible(p.offre, tarifs, quand)) return courant
-  const droits = p.droits ?? (await droitsAcademie(p.userId))
+  // (27/11/2026, correctif des bonus membres) Un tarif vaut mais les droits du compte sont illisibles : incertain (la
+  // route ne vend pas, achatAVerifier), plus une exception que l'achat par carte rattrapait au prix plein, en silence.
+  let droits: Pick<Droits, 'liveClub' | 'ouvertures'>
+  try {
+    droits = p.droits ?? (await droitsAcademie(p.userId))
+  } catch (err) {
+    console.warn(`[academie/prix-membre] droits illisibles, statut membre inconnu offre=${p.offre} : ${err instanceof Error ? err.name : 'erreur'}`)
+    return { ...courant, incertain: true }
+  }
   const moduleId = tarifs.find(t => t.moduleId)?.moduleId ?? null
   // (20/11/2026) Une regle par tarif : une partie garde celle de la partie 2, un module entier demande le Live Club actif.
   const calcul = prixMembre({ offre: p.offre, prixCourantEur: p.prixCourantEur, membre: membreDuTarif(droits, p.offre, moduleId), tarifs, quand })

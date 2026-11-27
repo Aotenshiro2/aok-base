@@ -1,5 +1,27 @@
 # ETAT du journal d etudes
 
+## BONUS MEMBRES DU LIVE CLUB : LE CORRECTIF (27/11/2026, Brice « Vas-y fait tout le correctif » ; branche bonus-membres depuis origin/master 2b0c834, commitee NON poussee ; aucune migration)
+
+- Audit du 27/11 (side-session-notes, bonus-membres-audit-rapport.md), trous 1 a 4. Le lien a 267 EUR n'est pas touche.
+- liveclub/compte.ts (+ compte-pur.ts) : liveClubDuCompte(emailsVerifies), le Live Club d'un compte du site par TOUS
+  ses emails connus (verifies, fiche du cockpit, rattachements Live Club actifs et leurs cus_ melanie ;
+  SQL_LIVECLUB_COMPTE), sources sans Stripe (exemption, broker, manuel, aussi par le telegram_id des rattachements),
+  filet cockpit_abonnements, puis Stripe MelTrade en direct (4 s, cache par email ou client oui 10 min / non 5 min,
+  deplace d'academie/droits.ts). Ne jette jamais ; lecture ratee = 'inconnu'.
+- Carnet et Pilotage Premium (checkMentoratAccess) : etape 4, en DERNIER, le Live Club en direct (cache par compte oui
+  10 min, non 1 min, inconnu jamais). Raison 'liveclub'. La vue reste lue (etape 2) : l'une OU l'autre. Personne ne
+  change de raison ; Stripe lent = la vue decide, pas d'echec.
+- Academie (droitsAcademie) : sans source sans Stripe ni filet sur les emails verifies, liveClubDuCompte. Prix membres
+  du Black Friday : prixDuCompte rend incertain si les droits sont illisibles ; /api/academie/achat et
+  /api/club/paypal/commande repondent 503 'membre_inconnu' { message, reessayer } au lieu du prix plein
+  (achatAVerifier). Le site affiche aujourd'hui son message generique « Reessaie dans un instant » + Fermer : le bouton
+  Reessayer et le texte dedie sont a faire dans sites/Aoknowledgecom/v3/src/academie (achat.ts, Achat.tsx).
+- droitLiveClub (bot, groupe, passage) : etape 2 bis, les autres emails de la fiche du payeur (5 au plus) quand le
+  client et l'email rattaches n'ont rien donne. Lecture ratee = erreur (inconnu), jamais un 'non' de plus.
+- Verifs : verifier-bonus-membres (7 blocs), -academie (cablage mis a jour), -liveclub (66), -partie2-membres-bf,
+  -modules-membres-bf, -achat-academie, -module-paypal, -parties-smt, -soutien, -suivi-lots, -carnet-reference,
+  -pause-depot, -changement-formule, -besoins : ok. tsc, eslint des fichiers touches, next build : ok.
+
 ## BOT LIVE CLUB : LE CHANGEMENT DE FORMULE (27/11/2026, GO de Brice « Go maintenant », chat de l'Orchestre Prix ; branche changement-formule depuis origin/master f07371a, poussee sur master ; migration 20261127120000 appliquee)
 
 - Outils de l'agent proposer_changement_formule { vers: mensuel | forfait_3_mois } et proposer_annuler_changement, comme

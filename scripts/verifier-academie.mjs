@@ -191,9 +191,11 @@ bloc('Live Club d un ETM ou d un VIP (10/11) : exemption, broker ou manuel sans 
   // droits.ts : une seule regle pour les deux chemins, et la source ne sort que pour un oui hors equipe.
   const droits = readFileSync(new URL('../src/lib/academie/droits.ts', import.meta.url), 'utf8')
   assert.match(droits, /const source = sourceSansStripe\(c\)/)
-  assert.match(droits, /const brokerOuManuel = source !== null/)
+  // (27/11/2026, correctif des bonus membres) Une source sans Stripe tranche avant Stripe ; sinon tous les emails connus.
+  assert.match(droits, /if \(source !== null\) \{\n\s+liveClub = 'oui'/)
+  assert.match(droits, /liveClubDuCompte\(emails, \{ faitsVerifies: c \?\? null \}\)/)
   assert.match(droits, /\} else \{[\s\S]{0,300}liveClub = liveClubDuStatut\(faits, source\)/)
-  assert.match(droits, /sourceLiveClub: liveClub === 'oui' && !equipe \? source : null/)
+  assert.match(droits, /sourceLiveClub: liveClub === 'oui' && !equipe \? source \?\? sourceEtendue : null/)
 })
 
 bloc('Adresses a relier (10/11, restes) : /moi rend un NOMBRE, lu sur la fiche reliee, jamais les adresses', () => {

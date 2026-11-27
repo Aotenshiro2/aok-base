@@ -17,8 +17,39 @@
 // l'extension.
 import { prisma } from './db'
 import { CARNET_PREMIUM_PRODUIT, lireAbonnementsApp, type AbonnementsApp } from './soutien-pur'
-import { estEquipe } from './academie/pur'
+import { CacheCourt, estEquipe } from './academie/pur'
+import { SQL_IDENTITE } from './academie/requetes'
 import { creerIndexReferences, reconnaitreCarnet, type Lecture } from './carnet-premium-pur'
+import { liveClubDuCompte } from './liveclub/compte'
+import { dureeCacheCompte, premiumParLiveClub, type EtatLu } from './liveclub/compte-pur'
+
+// (27/11/2026, correctif des bonus membres, trous 1 et 2 de l'audit) Le Live
+// Club EN DIRECT, comme le bot et l'academie (liveclub/compte.ts) : Stripe
+// MelTrade (trialing compris, meilleur abonnement de la personne), par tous
+// les emails connus du compte (verifies, fiche du cockpit, rattachements),
+// avec l'acces broker, les exemptions et l'acces manuel. La vue du cockpit
+// (abonnement_en_cours, rafraichie chaque matin) reste le filet : l'une OU
+// l'autre ouvre le Premium (premiumParLiveClub). Cache par compte : 'oui'
+// 10 min, 'non' 1 min, 'inconnu' jamais ; Stripe en cache par email en plus.
+// Stripe lent ou en erreur : 'inconnu', on garde ce que disait la vue, et
+// checkMentoratAccess ne jette pas pour autant.
+const cacheLiveClubCompte = new CacheCourt<EtatLu>(500)
+
+async function liveClubEnDirect(userId: string): Promise<EtatLu> {
+  const enCache = cacheLiveClubCompte.lire(userId)
+  if (enCache !== undefined) return enCache
+  try {
+    const ident = (await prisma.$queryRawUnsafe<{ emails: string[] | null }[]>(SQL_IDENTITE, userId))[0]
+    const lc = await liveClubDuCompte(ident?.emails ?? [])
+    const duree = dureeCacheCompte(lc.statut)
+    if (duree > 0) cacheLiveClubCompte.ecrire(userId, lc.statut, duree)
+    return lc.statut
+  } catch (err) {
+    const nom = (err as { name?: string } | null)?.name ?? 'erreur'
+    console.warn(`[entitlements] Live Club en direct illisible (${nom}) : la vue du cockpit decide`)
+    return 'inconnu'
+  }
+}
 
 // 'duo' (brief E1, 30/10/2026) : l'abonnement Premium Duo (Carnet + Pilotage,
 // Stripe aoknowledge) ouvre le même palier que 'carnet-premium'.
@@ -334,6 +365,17 @@ export async function checkMentoratAccess(userId: string): Promise<MentoratAcces
   // (client_reference_id du lien de paiement), l'email en repli.
   if (await hasCarnetPremium(userId, email)) {
     return { entitled: true, reason: 'carnet-premium', email }
+  }
+
+  // 4. (27/11/2026) Le Live Club en direct (liveClubEnDirect, plus haut) :
+  // l'achat ouvre le Carnet et Pilotage Premium sans attendre le push du
+  // matin, le depot broker, l'exemption et l'acces manuel aussi. Lu en
+  // DERNIER, expres : il n'ajoute un droit qu'a qui n'en avait aucun, et ne
+  // change la raison de personne (la vue, lue plus haut, donne deja
+  // 'liveclub' a qui elle reconnait). Raison 'liveclub', lue par Pilotage
+  // (RAISONS_CLUB_PILOTAGE) et /api/pilotage/niveau comme avant.
+  if (premiumParLiveClub({ vue: m?.abonnement_en_cours, direct: await liveClubEnDirect(userId) })) {
+    return { entitled: true, reason: 'liveclub', email }
   }
 
   return { entitled: false, reason: null, email }

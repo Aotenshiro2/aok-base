@@ -139,3 +139,19 @@ export function expirationSession(fin: Date, maintenant: Date): number | null {
 /** Ce que /moi rend d'un tarif applique, pour la page du module : le prix, le prix barre et la fin. */
 export const vueTarif = (c: PrixCalcule) =>
   c.tarif ? { prix_eur: c.prixEur, prix_courant_eur: c.prixCourantEur, fin_le: c.tarif.fin.toISOString() } : null
+
+/**
+ * (27/11/2026, correctif des bonus membres, trou 3) Plus jamais le prix plein
+ * en silence : quand un tarif membre vaut mais que le statut du compte n'a
+ * pas pu etre lu (Stripe lent ou illisible, apres le filet du cockpit, le
+ * broker et l'acces manuel), ou que les droits du compte n'ont pas pu etre
+ * lus du tout (prixDuCompte rend alors incertain), on ne lance PAS l'achat.
+ * La route repond 503 'membre_inconnu' avec ce message, et la page propose
+ * de reessayer. Un tarif applique, ou un non membre lu sans erreur : on vend.
+ */
+export function achatAVerifier(calcul: { tarif: TarifMembre | null; incertain: boolean }): boolean {
+  return !calcul.tarif && calcul.incertain
+}
+
+export const ERREUR_MEMBRE_INCONNU = 'membre_inconnu'
+export const TEXTE_MEMBRE_INCONNU = "On n'a pas pu vérifier ton statut de membre. Réessaie dans un instant."

@@ -19,7 +19,8 @@ import { abonnementsLiveClubDuClient, abonnementsLiveClubParEmail, type Abonneme
 import { lireProduitsLiveClub } from './produits'
 import { depotsPerdusDesAcces, lotsDesAcces } from './lots-lecture'
 import type { EtatLots } from './lots-pur'
-import { dateIso, detteOuverte, finDuDroit, meilleurAbonnement, messageErreur, relationAbsente, type Dette } from './pur'
+import { dateIso, detteOuverte, finDuDroit, meilleurAbonnement, messageErreur, normaliserEmail, relationAbsente, type Dette } from './pur'
+import { emailsDuCompte } from './compte-pur'
 
 export { meilleurAbonnement }
 
@@ -56,6 +57,29 @@ export type Droit = {
   depotPerdu?: { commissionId: string }
   /** Sources illisibles (codes courts, sans donnee personnelle), pour les logs. */
   erreurs?: string[]
+}
+
+/** Au plus 5 autres emails de la fiche lus chez Stripe (2 appels chacun). */
+const MAX_AUTRES_EMAILS_FICHE = 5
+
+/**
+ * (27/11/2026) Les emails de la fiche du cockpit du payeur rattache, sauf
+ * l'email du rattachement (deja lu) : le principal et le verifie d'abord.
+ * Fiche : le membre_id du rattachement, sinon celle de son email. Jette si la
+ * base ne repond pas.
+ */
+async function autresEmailsDeLaFiche(membreId: string | null, emailRattache: string | null): Promise<string[]> {
+  const membre = membreId ?? (emailRattache ? await membreParEmail(emailRattache) : null)
+  if (!membre) return []
+  const lignes = await prisma.$queryRaw<{ email: string }[]>`
+    select email from public.cockpit_membre_emails
+    where membre_id::text = ${membre}::text
+    order by principal desc nulls last, verifie desc nulls last, vu_le desc nulls last
+    limit 12`
+  const deja = normaliserEmail(emailRattache)
+  return emailsDuCompte({ verifies: [], fiche: lignes.map(l => l.email) }, 12)
+    .filter(e => e !== deja)
+    .slice(0, MAX_AUTRES_EMAILS_FICHE)
 }
 
 type LigneAcces = { acces_id: string; jusquau: Date }
@@ -132,6 +156,32 @@ export async function droitLiveClub(telegramId: number, opts: { exemptionIgnoree
       }
     } catch (err) {
       erreurs.push(`stripe: ${messageErreur(err)}`)
+    }
+
+    // 2 bis. (27/11/2026, correctif des bonus membres, trou 4) Les AUTRES
+    // emails de la fiche du cockpit du payeur (cockpit_membre_emails du
+    // membre rattache, ou du membre de l'email rattache) : un nouveau forfait
+    // pris sous un autre email et un autre client Stripe de la meme personne
+    // garde le groupe et le bot, sans attendre qu'il rouvre la page de
+    // bienvenue. Des liens poses par nous, jamais un email saisi. Lu seulement
+    // quand le client et l'email rattaches n'ont rien donne. Une lecture ratee
+    // ajoute une erreur : 'inconnu' au pire, qui ne sort ni ne refuse personne.
+    // Ces abonnements ne vont pas dans `lus` : la dette d'un 'non' reste celle
+    // du payeur rattache, comme avant.
+    try {
+      for (const email of await autresEmailsDeLaFiche(rattachement.membre_id ?? null, rattachement.email ?? null)) {
+        const abo = meilleurAbonnement(await abonnementsLiveClubParEmail(email))
+        if (!abo) continue
+        const fin = finDuDroit(abo)
+        return {
+          statut: 'oui', raison: 'abonnement', ...base,
+          abonnementId: abo.id,
+          ...(abo.clientStripe ? { clientStripe: abo.clientStripe } : {}),
+          ...(fin ? { fin } : {}),
+        }
+      }
+    } catch (err) {
+      erreurs.push(`stripe_fiche: ${messageErreur(err)}`)
     }
   }
 

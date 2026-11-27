@@ -41,6 +41,11 @@
 // Club a ouvrir). Stripe : cache par email (oui 10 min, non 5 min, 500
 // entrees), 4 s au plus par email ; un delai ou une erreur rend le Live Club
 // 'inconnu', sans cache.
+// (27/11/2026, correctif des bonus membres) Le Live Club se lit par TOUS les
+// emails connus du compte, pas seulement les verifies : ceux de sa fiche du
+// cockpit et de ses rattachements Live Club (liveclub/compte.ts, qui porte
+// desormais le cache et le delai Stripe). Les acces academie_acces restent
+// lus par les seuls emails verifies.
 //
 // Jamais un faux « non » : une base illisible fait JETER droitsAcademie (la
 // route repond 503) ; un Stripe illisible rend 'inconnu' les contenus que
@@ -53,11 +58,9 @@
 
 import { prisma } from '@/lib/db'
 import { checkMentoratAccess, type MentoratReason } from '@/lib/entitlements'
-import { abonnementsLiveClubParEmail } from '@/lib/liveclub/stripe'
-import { lireProduitsLiveClub } from '@/lib/liveclub/produits'
-import { meilleurAbonnement } from '@/lib/liveclub/pur'
+import { liveClubDuCompte } from '@/lib/liveclub/compte'
 import {
-  CacheCourt, conclureLiveClub, estAdmin, estEquipe, liveClubDuStatut, liveClubUtile, preparerDroits, sourceSansStripe,
+  estAdmin, estEquipe, liveClubDuStatut, liveClubUtile, preparerDroits, sourceSansStripe,
   type Droits, type EtatLiveClub, type FaitsCompte, type LigneAcces, type SourceLiveClub,
 } from './pur'
 import { SQL_ACCES, SQL_FAITS_COCKPIT, SQL_IDENTITE } from './requetes'
@@ -79,65 +82,6 @@ export type DroitsAcademie = Droits & {
    * pour que Mon espace rappelle Comptes lies. N'ouvre rien.
    */
   autresAdresses: number
-}
-
-// ---------------------------------------------------------------------------
-// Live Club chez Stripe MelTrade, par email
-// ---------------------------------------------------------------------------
-
-const STRIPE_DELAI_MS = 4000
-const CACHE_OUI_MS = 10 * 60 * 1000
-const CACHE_NON_MS = 5 * 60 * 1000
-const cacheLiveClub = new CacheCourt<boolean>(500)
-const erreursSignalees = new Set<string>()
-
-function signalerUneFois(code: string, message: string) {
-  if (erreursSignalees.has(code)) return
-  erreursSignalees.add(code)
-  console.warn(`[academie/droits] ${message} (signale une seule fois par instance)`)
-}
-
-class DelaiDepasse extends Error {
-  constructor() {
-    super('delai depasse')
-    this.name = 'DelaiDepasse'
-  }
-}
-
-/** La promesse, ou une DelaiDepasse au bout de ms. L'appel continue en fond, sans effet. */
-function avecDelai<T>(promesse: Promise<T>, ms: number): Promise<T> {
-  let minuteur: ReturnType<typeof setTimeout> | undefined
-  const delai = new Promise<never>((_, rejeter) => {
-    minuteur = setTimeout(() => rejeter(new DelaiDepasse()), ms)
-  })
-  return Promise.race([promesse, delai]).finally(() => clearTimeout(minuteur))
-}
-
-async function liveClubParEmail(email: string): Promise<'oui' | 'non' | 'inconnu'> {
-  const enCache = cacheLiveClub.lire(email)
-  if (enCache !== undefined) return enCache ? 'oui' : 'non'
-  try {
-    const abonnements = await avecDelai(abonnementsLiveClubParEmail(email), STRIPE_DELAI_MS)
-    if (meilleurAbonnement(abonnements)) {
-      cacheLiveClub.ecrire(email, true, CACHE_OUI_MS)
-      return 'oui'
-    }
-    // Comme droitLiveClub : sans la liste complete des produits Live Club, un
-    // abonnement d'un produit inscrit depuis a pu etre ignore. Pas de 'non'.
-    if (!(await lireProduitsLiveClub()).complete) {
-      signalerUneFois('produits', 'liste des produits Live Club incomplete : Live Club inconnu')
-      return 'inconnu'
-    }
-    cacheLiveClub.ecrire(email, false, CACHE_NON_MS)
-    return 'non'
-  } catch (err) {
-    const nom = err instanceof Error ? err.name : 'erreur'
-    // Jamais le message : il peut reprendre la requete (et donc l'email).
-    signalerUneFois(`stripe:${nom}`, nom === 'DelaiDepasse'
-      ? `Stripe MelTrade n'a pas repondu en ${STRIPE_DELAI_MS} ms : Live Club inconnu, sans cache`
-      : `Stripe MelTrade illisible (${nom}) : Live Club inconnu, sans cache`)
-    return 'inconnu'
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -192,14 +136,23 @@ export async function droitsAcademie(userId: string): Promise<DroitsAcademie> {
   const erreurs: string[] = []
   // Exemption active, acces broker ou acces manuel : Live Club actif sans Stripe (ordre de droitLiveClub).
   const source = sourceSansStripe(c)
+  // (27/11/2026) Une source sans Stripe trouvee par un email de la fiche ou un rattachement (liveClubDuCompte).
+  let sourceEtendue: SourceLiveClub | null = null
   let liveClub: EtatLiveClub = 'non_lu'
   if (liveClubUtile(faits)) {
-    const brokerOuManuel = source !== null
-    const stripe = brokerOuManuel ? [] : await Promise.all(emails.map(liveClubParEmail))
-    liveClub = conclureLiveClub({ brokerOuManuel, stripe })
-    // (12/11/2026) Stripe par email ne retrouve pas toujours l abonnement : le cockpit, qui l a relie au membre, fait foi.
-    if (liveClub !== 'oui' && c?.abonnement_cockpit === true) liveClub = 'oui'
-    if (liveClub === 'inconnu') erreurs.push('liveclub: stripe illisible')
+    if (source !== null) {
+      liveClub = 'oui'
+    } else if (c?.abonnement_cockpit === true) {
+      // (12/11/2026) Stripe par email ne retrouve pas toujours l abonnement : le cockpit, qui l a relie au membre, fait foi.
+      liveClub = 'oui'
+    } else {
+      // (27/11/2026, correctif des bonus membres) Par TOUS les emails connus du compte (fiche du cockpit, rattachements
+      // Live Club), plus les sources sans Stripe et le filet sur ces emails : liveclub/compte.ts. Ne jette pas.
+      const lc = await liveClubDuCompte(emails, { faitsVerifies: c ?? null })
+      liveClub = lc.statut
+      if (lc.sansStripe) sourceEtendue = lc.sansStripe
+      if (liveClub === 'inconnu') erreurs.push(...(lc.erreurs.length ? lc.erreurs : ['liveclub: stripe illisible']))
+    }
   } else {
     // (10/11/2026) Un ETM ou un VIP dont le Live Club n'etait pas lu : les trois sources sans Stripe,
     // pour Mon espace (« Live Club actif »). Sans source : non_lu. Le statut seul n'ouvre pas le Live Club.
@@ -209,7 +162,7 @@ export async function droitsAcademie(userId: string): Promise<DroitsAcademie> {
   return {
     ...preparerDroits({ ...faits, liveClub }),
     erreurs,
-    sourceLiveClub: liveClub === 'oui' && !equipe ? source : null,
+    sourceLiveClub: liveClub === 'oui' && !equipe ? source ?? sourceEtendue : null,
     // (10/11/2026) Les adresses de sa fiche encore a relier : un nombre pour le rappel de Mon espace.
     autresAdresses: Math.max(0, Number(c?.autres_adresses ?? 0) || 0),
   }

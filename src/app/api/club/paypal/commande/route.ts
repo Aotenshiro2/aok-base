@@ -5,6 +5,7 @@ import { roleAcademie } from '@/lib/academie/droits'
 import { compteDuJeton, corsAcademie, entetesAcademie, refusAcademie, tronquer } from '@/lib/academie/http'
 import { estAdmin } from '@/lib/academie/pur'
 import { prixDuCompte } from '@/lib/academie/prix-membre'
+import { achatAVerifier, ERREUR_MEMBRE_INCONNU, TEXTE_MEMBRE_INCONNU } from '@/lib/academie/prix-membre-pur'
 import { messageErreur } from '@/lib/liveclub/pur'
 
 /**
@@ -137,6 +138,12 @@ export async function POST(req: NextRequest) {
   if (!essai && offre.referenceMembre && userId) {
     try {
       const calcul = await prixDuCompte({ userId, offre: offre.slug, prixCourantEur: montantEur })
+      // (27/11/2026, correctif des bonus membres) Tarif possible, statut du compte inconnu : pas de commande au prix
+      // plein. 503 'membre_inconnu' (les boutons PayPal relancent sur une erreur, puis la page dit de reessayer).
+      if (achatAVerifier(calcul)) {
+        console.warn(`[club/paypal/commande] statut membre inconnu, commande suspendue offre=${offre.cle}`)
+        return refusAcademie(ERREUR_MEMBRE_INCONNU, 503, headers, { message: TEXTE_MEMBRE_INCONNU, reessayer: true })
+      }
       if (calcul.tarif) {
         montantEur = calcul.prixEur
         membre = true
