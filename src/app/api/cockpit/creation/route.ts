@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
 import { aiClient, AI_MODEL, logAiUsage, aiErrorMessage } from '@/lib/ai'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
+import { accesCreationCockpit } from '@/lib/acces-creation-cockpit'
 import {
   MAX_REFERENCE,
   OUTILS,
@@ -91,6 +92,7 @@ const MAX_PAGES_REFERENCE_LUES = 200
 
 type Ligne = {
   id: string
+  auteur?: string | null
   auteur_label: string | null
   titre: string
   phrase: string | null
@@ -117,10 +119,10 @@ export async function POST(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers })
 
   // Le garde réel : l'allowlist du cockpit, par UUID. Le projet Supabase est
-  // partagé avec un site public.
-  const allow = await prisma.$queryRaw<{ ok: number }[]>`
-    select 1 as ok from public.cockpit_allowlist where user_id = ${userId}::uuid`
-  if (allow.length === 0) {
+  // partagé avec un site public. (28/11/2026) Le niveau d'accès restreint
+  // (cockpit_niveaux) y entre aussi, borné à SES découpages (plus bas).
+  const acces = await accesCreationCockpit(userId)
+  if (!acces) {
     return NextResponse.json({ error: 'Réservé au cockpit' }, { status: 403, headers })
   }
 
@@ -182,7 +184,7 @@ export async function POST(req: NextRequest) {
     let lignes: Ligne[]
     try {
       lignes = await prisma.$queryRaw<Ligne[]>`
-        select d.id::text as id, d.auteur_label, d.titre, d.phrase, d.usage, d.parent_idee,
+        select d.id::text as id, d.auteur::text as auteur, d.auteur_label, d.titre, d.phrase, d.usage, d.parent_idee,
                d.noeuds, d.retire_le, a.label as allow_label, a.email as allow_email
         from public.cockpit_decoupages d
         left join public.cockpit_allowlist a on a.user_id = d.auteur
@@ -194,6 +196,9 @@ export async function POST(req: NextRequest) {
     const ligne = lignes[0]
     if (!ligne || ligne.retire_le) {
       return NextResponse.json({ error: 'Découpage introuvable ou retiré.' }, { status: 404, headers })
+    }
+    if (acces === 'niveau' && ligne.auteur !== userId) {
+      return NextResponse.json({ error: 'Ce découpage n\'est pas le tien : les gestes d\'IA restent sur tes découpages.' }, { status: 403, headers })
     }
     const noeuds = lireNoeuds(ligne.noeuds)
     if (demande.cible && !noeuds.some((n) => n.id === demande.cible)) {
