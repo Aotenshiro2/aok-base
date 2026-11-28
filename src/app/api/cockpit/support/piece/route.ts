@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { accesSupportCockpit } from '@/lib/acces-support-cockpit'
 import { getUserId } from '@/lib/api-auth'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
 import { telechargerImageTelegram } from '@/lib/agent-cockpit-telegram'
@@ -40,8 +41,8 @@ export async function POST(req: NextRequest) {
   const erreur = (error: string, status: number) => NextResponse.json({ error }, { status, headers })
   const userId = await getUserId(req)
   if (!userId) return erreur('Unauthorized', 401)
-  const allow = await prisma.$queryRaw<{ ok: number }[]>`
-    select 1 as ok from public.cockpit_allowlist where user_id = ${userId}::uuid`
+  // (28/11) Allowlist du cockpit OU niveau restreint (acces-support-cockpit.ts) : gestes du support seulement.
+  const allow = (await accesSupportCockpit(userId)) ? [1] : []
   if (allow.length === 0) return erreur('Réservé au cockpit', 403)
 
   const body = await req.json().catch(() => ({}))

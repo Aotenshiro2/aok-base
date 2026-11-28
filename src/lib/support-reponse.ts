@@ -80,8 +80,12 @@ export async function repondreAuFil(
 /** Le nom de l'acteur du cockpit (cockpit_allowlist.label), ou null. */
 async function nomDuCompte(userId: string): Promise<string | null> {
   try {
+    // (28/11) Un compte du niveau restreint (cockpit_niveaux) n'est pas dans l'allowlist : son nom est l'intervenant.
     const l = await prisma.$queryRaw<{ label: string | null }[]>`
-      select label from public.cockpit_allowlist where user_id = ${userId}::uuid`
+      select label from public.cockpit_allowlist where user_id = ${userId}::uuid
+      union all
+      select intervenant as label from public.cockpit_niveaux where user_id = ${userId}::uuid and niveau = 'animateur'
+      limit 1`
     return l[0]?.label?.trim() || null
   } catch {
     return null
